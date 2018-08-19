@@ -1,0 +1,139 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.4	//
+BYTE	C:\Program Files (x86)\SourceBoost\Include\novo.h	74;"	t
+C	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	48;"	d
+DC	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	47;"	d
+DTASK_HANDLE	C:\Program Files (x86)\SourceBoost\Include\novo.h	76;"	t
+EEADR	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	31;"	d
+EECON1	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	37;"	d
+EECON2	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	38;"	d
+EEDATA	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	30;"	d
+EEIE	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	52;"	d
+EEIF	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	71;"	d
+EN_TASK_STATUS	C:\Program Files (x86)\SourceBoost\Include\novo.h	97;"	g
+EVENT_HANDLE	C:\Program Files (x86)\SourceBoost\Include\novo.h	77;"	t
+EVENT_NO_TIMEOUT	C:\Program Files (x86)\SourceBoost\Include\novo.h	95;"	d
+EVENT_QUEUE_HEAD_OFFSET	C:\Program Files (x86)\SourceBoost\Include\novo.h	88;"	d
+F	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	20;"	d
+FLAG	C:\Program Files (x86)\SourceBoost\Include\novo.h	78;"	t
+FSR	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	27;"	d
+GIE	C:\Program Files (x86)\SourceBoost\Include\novo.h	61;"	d
+GIE	C:\Program Files (x86)\SourceBoost\Include\novo.h	68;"	d
+GIE	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	51;"	d
+HIBYTE	C:\Program Files (x86)\SourceBoost\Include\boostc.h	45;"	d
+INDF	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	23;"	d
+INTCON	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	33;"	d
+INTE	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	54;"	d
+INTEDG	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	62;"	d
+INTF	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	57;"	d
+IRP	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	41;"	d
+LOBYTE	C:\Program Files (x86)\SourceBoost\Include\boostc.h	39;"	d
+MAKESHORT	C:\Program Files (x86)\SourceBoost\Include\boostc.h	33;"	d
+MAX_EQ_INDEX	C:\Program Files (x86)\SourceBoost\Include\novo.h	92;"	d
+NOT_PD	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	45;"	d
+NOT_RBPU	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	61;"	d
+NOT_TO	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	44;"	d
+NULL	C:\Program Files (x86)\SourceBoost\Include\boostc.h	18;"	d
+OPTION_REG	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	34;"	d
+PCL	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	25;"	d
+PCLATH	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	32;"	d
+PEND_EVENT_QUEUE_HEAD	C:\Program Files (x86)\SourceBoost\Include\novo.h	89;"	d
+PORTA	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	28;"	d
+PORTB	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	29;"	d
+PS0	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	68;"	d
+PS1	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	67;"	d
+PS2	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	66;"	d
+PSA	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	65;"	d
+QUEUE_HEADS	C:\Program Files (x86)\SourceBoost\Include\novo.h	81;"	d
+RBIE	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	55;"	d
+RBIF	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	58;"	d
+RD	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	75;"	d
+RP0	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	43;"	d
+RP1	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	42;"	d
+RUN_QUEUE_HEAD	C:\Program Files (x86)\SourceBoost\Include\novo.h	82;"	d
+SLEEP_QUEUE_HEAD	C:\Program Files (x86)\SourceBoost\Include\novo.h	83;"	d
+STATUS	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	26;"	d
+Scheduler	C:\Program Files (x86)\SourceBoost\Include\novo.h	154;"	t
+SysCreateTask	C:\Program Files (x86)\SourceBoost\Include\novo.h	186;"	d
+SysCriticalSectionBegin	C:\Program Files (x86)\SourceBoost\Include\novo.h	158;"	d
+SysCriticalSectionEnd	C:\Program Files (x86)\SourceBoost\Include\novo.h	162;"	d
+SysGetPriority	C:\Program Files (x86)\SourceBoost\Include\novo.h	204;"	d
+SysGetTaskStatus	C:\Program Files (x86)\SourceBoost\Include\novo.h	192;"	d
+SysReadSemaphore	C:\Program Files (x86)\SourceBoost\Include\novo.h	224;"	f
+SysSignalBinarySemaphore	C:\Program Files (x86)\SourceBoost\Include\novo.h	260;"	d
+SysSignalSemaphore	C:\Program Files (x86)\SourceBoost\Include\novo.h	217;"	d
+SysSignalSemaphoreIsr	C:\Program Files (x86)\SourceBoost\Include\novo.h	212;"	d
+SysWaitBinarySemaphore	C:\Program Files (x86)\SourceBoost\Include\novo.h	261;"	d
+SysWaitTimedOut	C:\Program Files (x86)\SourceBoost\Include\novo.h	245;"	d
+Sys_Sleep	C:\Program Files (x86)\SourceBoost\Include\novo.h	247;"	d
+Sys_StopTask	C:\Program Files (x86)\SourceBoost\Include\novo.h	194;"	d
+Sys_WaitSemaphore	C:\Program Files (x86)\SourceBoost\Include\novo.h	231;"	d
+T0CS	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	63;"	d
+T0IE	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	53;"	d
+T0IF	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	56;"	d
+T0SE	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	64;"	d
+TASK_HANDLE	C:\Program Files (x86)\SourceBoost\Include\novo.h	75;"	t
+TMR0	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	24;"	d
+TRISA	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	35;"	d
+TRISB	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	36;"	d
+TS_EVENT_TIMEOUT	C:\Program Files (x86)\SourceBoost\Include\novo.h	103;"	e	enum:EN_TASK_STATUS
+TS_IN_EVENT_Q	C:\Program Files (x86)\SourceBoost\Include\novo.h	102;"	e	enum:EN_TASK_STATUS
+TS_IN_RUN_Q	C:\Program Files (x86)\SourceBoost\Include\novo.h	100;"	e	enum:EN_TASK_STATUS
+TS_IN_SLEEP_Q	C:\Program Files (x86)\SourceBoost\Include\novo.h	101;"	e	enum:EN_TASK_STATUS
+TS_IS_WAKING	C:\Program Files (x86)\SourceBoost\Include\novo.h	104;"	e	enum:EN_TASK_STATUS
+TS_NOT_STOPPED	C:\Program Files (x86)\SourceBoost\Include\novo.h	99;"	e	enum:EN_TASK_STATUS
+W	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	19;"	d
+WR	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	74;"	d
+WREN	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	73;"	d
+WRERR	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	72;"	d
+Z	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	46;"	d
+_BOOSTC_H_	C:\Program Files (x86)\SourceBoost\Include\boostc.h	14;"	d
+_CONFIG	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	97;"	d
+_CP_OFF	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	84;"	d
+_CP_ON	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	83;"	d
+_EEPROM	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	104;"	d
+_HS_OSC	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	91;"	d
+_LP_OSC	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	89;"	d
+_NOVO_H_	C:\Program Files (x86)\SourceBoost\Include\novo.h	52;"	d
+_PIC16F84_H_	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	11;"	d
+_PWRTE_OFF	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	86;"	d
+_PWRTE_ON	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	85;"	d
+_RC_OSC	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	92;"	d
+_SYSTEM_H_	C:\Program Files (x86)\SourceBoost\Include\system.h	10;"	d
+_Scheduler	C:\Program Files (x86)\SourceBoost\Include\novo.h	108;"	s
+_WDT_OFF	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	88;"	d
+_WDT_ON	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	87;"	d
+_XT_OSC	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	90;"	d
+abs	C:\Program Files (x86)\SourceBoost\Include\boostc.h	29;"	d
+clear_bit	C:\Program Files (x86)\SourceBoost\Include\boostc.h	22;"	d
+clear_wdt	C:\Program Files (x86)\SourceBoost\Include\boostc.h	64;"	f
+eeadr	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	114;"	v
+eecon1	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	120;"	v
+eecon2	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	121;"	v
+eedata	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	113;"	v
+fsr	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	110;"	v
+indf	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	106;"	v
+intcon	C:\Program Files (x86)\SourceBoost\Include\novo.h	60;"	v
+intcon	C:\Program Files (x86)\SourceBoost\Include\novo.h	67;"	v
+intcon	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	116;"	v
+main	tesla-controller.c	3;"	f
+nop	C:\Program Files (x86)\SourceBoost\Include\boostc.h	59;"	f
+option_reg	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	117;"	v
+pcl	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	108;"	v
+pclath	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	115;"	v
+porta	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	111;"	v
+portb	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	112;"	v
+reset	C:\Program Files (x86)\SourceBoost\Include\boostc.h	77;"	f
+reset	C:\Program Files (x86)\SourceBoost\Include\boostc.h	85;"	f
+set_bit	C:\Program Files (x86)\SourceBoost\Include\boostc.h	23;"	d
+sleep	C:\Program Files (x86)\SourceBoost\Include\boostc.h	69;"	f
+status	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	109;"	v
+test_bit	C:\Program Files (x86)\SourceBoost\Include\boostc.h	24;"	d
+tmr0	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	107;"	v
+toggle_bit	C:\Program Files (x86)\SourceBoost\Include\boostc.h	25;"	d
+trisa	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	118;"	v
+trisb	C:\Program Files (x86)\SourceBoost\Include\pic16F84.h	119;"	v

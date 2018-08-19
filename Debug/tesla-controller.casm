@@ -1,0 +1,2940 @@
+;/////////////////////////////////////////////////////////////////////////////////
+;// Code Generator: BoostC Compiler - http://www.sourceboost.com
+;// Version       : 7.42
+;// License Type  : Pro License
+;// Limitations   : PIC12,PIC16 max code size:Unlimited, max RAM banks:Unlimited
+;/////////////////////////////////////////////////////////////////////////////////
+
+
+//
+// HEADER FILES
+//
+#include <system.h>
+#include <memory.h>
+
+// PIC CONFIG BITS
+// - RESET INPUT DISABLED
+// - WATCHDOG TIMER OFF
+// - INTERNAL OSC
+#pragma DATA _CONFIG1, _FOSC_INTOSC & _WDTE_OFF & _MCLRE_OFF &_CLKOUTEN_OFF
+#pragma DATA _CONFIG2, _WRT_OFF & _PLLEN_OFF & _STVREN_ON & _BORV_19 & _LVP_OFF
+#pragma CLOCK_FREQ 16000000
+
+//
+// TYPE DEFS
+//
+typedef unsigned char byte;
+
+//
+// MACRO DEFS
+//
+
+/*+
+		VDD - VSS
+LED		RA5	- RA0/PGD	PGD
+AN		RA4 - RA1/PGC	PGC
+VPP		VPP - RA2		AN
+RX		RC5 - RC0		AN
+-		RC4 - RC1		OUT2
+OUT1	RC3 - RC2		AN
+*/
+#define P_LED 	lata.5
+#define P_OUT1 	latc.3
+#define P_OUT2 	latc.1
+
+
+#define TRIS_A 	0b11011111
+#define TRIS_C 	0b11110101
+
+//
+// GLOBAL DATA
+//
+
+// define the buffer used to receive MIDI input
+#define SZ_RXBUFFER 			64		// size of MIDI receive buffer (power of 2)
+#define SZ_RXBUFFER_MASK 		0x3F	// mask to keep an index within range of buffer
+volatile byte rx_buffer[SZ_RXBUFFER];	// the MIDI receive buffer
+volatile byte rx_head = 0;				// buffer data insertion index
+0649  0021  	MOVLB 0x01
+064A  01B4  	CLRF gbl_rx_head
+
+volatile byte rx_tail = 0;				// buffer data retrieval index
+064B  01B5  	CLRF gbl_rx_tail
+
+
+// State flags used while receiving MIDI data
+byte midi_status = 0;					// current MIDI message status (running status)
+064C  01B6  	CLRF gbl_midi_status
+
+byte midi_num_params = 0;				// number of parameters needed by current MIDI message
+064D  01B7  	CLRF gbl_midi_num_params
+
+byte midi_params[2];					// parameter values of current MIDI message
+char midi_param = 0;					// number of params currently received
+064E  01B8  	CLRF gbl_midi_param
+
+
+#define NO_NOTE 0xFF
+
+
+//////////////////////////////////////////////////
+#define OSC_RESOLUTION 1000000L
+#define WAVE_OFF 0xFF
+
+enum {
+	WAVE_LOW,
+	WAVE_HIGH
+};
+
+typedef struct {
+	int freq;
+	int duty;
+	
+	volatile byte phase;
+	volatile unsigned int next_event;
+	volatile unsigned int high_ticks;
+	volatile unsigned int low_ticks;
+	
+	volatile byte update;
+	volatile unsigned int next_high_ticks;
+	volatile unsigned int next_low_ticks;
+} OSCILLATOR;
+
+OSCILLATOR osc1;
+
+
+#define NUM_ADC_CHANNELS	4
+#define MK_ADC_CONF(a) 0b00000001|((a)<<2)
+#define ADC_0_RA0	MK_ADC_CONF(0)
+#define ADC_1_RA1	MK_ADC_CONF(1)
+#define ADC_2_RA2	MK_ADC_CONF(2)
+#define ADC_3_RA4	MK_ADC_CONF(3)
+#define ADC_4_RC0	MK_ADC_CONF(4)
+#define ADC_5_RC1	MK_ADC_CONF(5)
+#define ADC_6_RC2	MK_ADC_CONF(6)
+#define ADC_7_RC3	MK_ADC_CONF(7)
+
+
+// MIDI message bytes
+#define MIDI_MTC_QTR_FRAME 		0xf1
+#define MIDI_SPP 				0xf2
+#define MIDI_SONG_SELECT 		0xf3 
+#define MIDI_SYNCH_TICK     	0xf8
+#define MIDI_SYNCH_START    	0xfa
+#define MIDI_SYNCH_CONTINUE 	0xfb
+#define MIDI_SYNCH_STOP     	0xfc
+#define MIDI_SYSEX_BEGIN     	0xf0
+#define MIDI_SYSEX_END     		0xf7
+////////////////////////////////////////////////////////////
+// INTERRUPT HANDLER CALLED WHEN CHARACTER RECEIVED AT 
+// SERIAL PORT OR WHEN TIMER 1 OVERLOWS
+void interrupt( void )
+
+{
+	// timer 0 rollover ISR. Maintains the count of 
+	// "system ticks" that we use for key debounce etc
+//	if(intcon.2)
+//	{
+		//tmr0 = TIMER_0_INIT_SCALAR;
+//		systemTicks++;
+//		intcon.2 = 0;
+//	}
+
+	// timer 1 rollover ISR. Responsible for timing
+	// the tempo of the MIDI clock
+//	if(pir1.0)
+	//{
+	//	tmr1l=(timer_init_scalar & 0xff); 
+		//tmr1h=(timer_init_scalar>>8); 
+		//tick_flag = 1;
+		//pir1.0 = 0;
+	//}
+
+	// Tone generation for voice 1
+	if(pir1.2) //CCP1IF
+0660  0020  	MOVLB 0x00
+0661  1D11  	BTFSS gbl_pir1,2
+0662  2EAB  	GOTO	label96
+06AB        label96
+
+	{	
+		if(osc1.phase == WAVE_LOW) { // AT END OF LOW PHASE
+0663  0021  	MOVLB 0x01
+0664  08A4  	MOVF gbl_osc1+D'4', F
+0665  1D03  	BTFSS STATUS,Z
+0666  2E7F  	GOTO	label91
+067F        label91
+
+			if(osc1.high_ticks) { // nonzero duty?			
+0667  08A7  	MOVF gbl_osc1+D'7', F
+0668  1D03  	BTFSS STATUS,Z
+0669  2E6D  	GOTO	label89
+066A  08A8  	MOVF gbl_osc1+D'8', F
+066B  1903  	BTFSC STATUS,Z
+066C  2E77  	GOTO	label90
+066D        label89
+0677        label90
+
+				P_OUT1 = 1;
+066D  0022  	MOVLB 0x02
+066E  158E  	BSF gbl_latc,3
+
+				osc1.next_event += osc1.high_ticks;
+066F  0021  	MOVLB 0x01
+0670  0827  	MOVF gbl_osc1+D'7', W
+0671  07A5  	ADDWF gbl_osc1+D'5', F
+0672  0828  	MOVF gbl_osc1+D'8', W
+0673  3DA6  	ADDWFC gbl_osc1+D'6', F
+
+				osc1.phase = WAVE_HIGH;		
+0674  3001  	MOVLW 0x01
+0675  00A4  	MOVWF gbl_osc1+D'4'
+
+			}
+			else {
+0676  2E95  	GOTO	label94
+
+				P_OUT1 = 0;
+0677  0022  	MOVLB 0x02
+0678  118E  	BCF gbl_latc,3
+
+				osc1.next_event += osc1.low_ticks;
+0679  0021  	MOVLB 0x01
+067A  0829  	MOVF gbl_osc1+D'9', W
+067B  07A5  	ADDWF gbl_osc1+D'5', F
+067C  082A  	MOVF gbl_osc1+D'10', W
+067D  3DA6  	ADDWFC gbl_osc1+D'6', F
+
+			}
+		}
+		else { // AT END OF HIGH PHASE
+067E  2E95  	GOTO	label94
+
+			if(osc1.low_ticks) { // nonzero duty?			
+067F  08A9  	MOVF gbl_osc1+D'9', F
+0680  1D03  	BTFSS STATUS,Z
+0681  2E85  	GOTO	label92
+0682  08AA  	MOVF gbl_osc1+D'10', F
+0683  1903  	BTFSC STATUS,Z
+0684  2E8E  	GOTO	label93
+0685        label92
+068E        label93
+
+				P_OUT1 = 0;
+0685  0022  	MOVLB 0x02
+0686  118E  	BCF gbl_latc,3
+
+				osc1.next_event += osc1.low_ticks;
+0687  0021  	MOVLB 0x01
+0688  0829  	MOVF gbl_osc1+D'9', W
+0689  07A5  	ADDWF gbl_osc1+D'5', F
+068A  082A  	MOVF gbl_osc1+D'10', W
+068B  3DA6  	ADDWFC gbl_osc1+D'6', F
+
+				osc1.phase = WAVE_LOW;		
+068C  01A4  	CLRF gbl_osc1+D'4'
+
+			}
+			else {
+068D  2E95  	GOTO	label94
+0695        label94
+
+				P_OUT1 = 1;
+068E  0022  	MOVLB 0x02
+068F  158E  	BSF gbl_latc,3
+
+				osc1.next_event += osc1.high_ticks;
+0690  0021  	MOVLB 0x01
+0691  0827  	MOVF gbl_osc1+D'7', W
+0692  07A5  	ADDWF gbl_osc1+D'5', F
+0693  0828  	MOVF gbl_osc1+D'8', W
+0694  3DA6  	ADDWFC gbl_osc1+D'6', F
+
+			}
+		}
+		ccpr1h = osc1.next_event >> 8;
+0695  0826  	MOVF gbl_osc1+D'6', W
+0696  0025  	MOVLB 0x05
+0697  0092  	MOVWF gbl_ccpr1h
+
+		ccpr1l = (byte)osc1.next_event;
+0698  0021  	MOVLB 0x01
+0699  0825  	MOVF gbl_osc1+D'5', W
+069A  0025  	MOVLB 0x05
+069B  0091  	MOVWF gbl_ccpr1l
+
+		
+		if(osc1.update) { // got new frequency/duty info?
+069C  0021  	MOVLB 0x01
+069D  08AB  	MOVF gbl_osc1+D'11', F
+069E  1903  	BTFSC STATUS,Z
+069F  2EA9  	GOTO	label95
+06A9        label95
+
+			osc1.high_ticks = osc1.next_high_ticks;
+06A0  082C  	MOVF gbl_osc1+D'12', W
+06A1  00A7  	MOVWF gbl_osc1+D'7'
+06A2  082D  	MOVF gbl_osc1+D'13', W
+06A3  00A8  	MOVWF gbl_osc1+D'8'
+
+			osc1.low_ticks = osc1.next_low_ticks;
+06A4  082E  	MOVF gbl_osc1+D'14', W
+06A5  00A9  	MOVWF gbl_osc1+D'9'
+06A6  082F  	MOVF gbl_osc1+D'15', W
+06A7  00AA  	MOVWF gbl_osc1+D'10'
+
+			osc1.update = 0;
+06A8  01AB  	CLRF gbl_osc1+D'11'
+
+		}
+		
+		pir1.2 = 0;
+06A9  0020  	MOVLB 0x00
+06AA  1111  	BCF gbl_pir1,2
+
+	}
+
+		
+	// serial rx ISR
+	if(pir1.5)
+06AB  1E91  	BTFSS gbl_pir1,5
+
+	{	
+		byte b = rcreg;
+06AD  0023  	MOVLB 0x03
+06AE  0819  	MOVF gbl_rcreg, W
+06AF  0021  	MOVLB 0x01
+06B0  00EB  	MOVWF interrupt_26_b
+
+		byte next_head = (rx_head + 1)&SZ_RXBUFFER_MASK;
+06B1  0A34  	INCF gbl_rx_head, W
+06B2  00EC  	MOVWF interrupt_26_next_head
+06B3  303F  	MOVLW 0x3F
+06B4  05EC  	ANDWF interrupt_26_next_head, F
+
+		if(next_head != rx_tail) {
+06B5  0835  	MOVF gbl_rx_tail, W
+06B6  066C  	XORWF interrupt_26_next_head, W
+06B7  1903  	BTFSC STATUS,Z
+06B8  2EC3  	GOTO	label97
+06C3        label97
+
+			rx_buffer[rx_head] = b;
+06B9  3000  	MOVLW	HIGH(gbl_rx_buffer)
+
+06BA  0085  	MOVWF FSR0H
+06BB  3020  	MOVLW LOW(gbl_rx_buffer+D'0')
+06BC  0084  	MOVWF FSR0L
+06BD  0834  	MOVF gbl_rx_head, W
+06BE  0784  	ADDWF FSR0L, F
+06BF  086B  	MOVF interrupt_26_b, W
+06C0  0080  	MOVWF INDF0
+
+			rx_head = next_head;
+06C1  086C  	MOVF interrupt_26_next_head, W
+06C2  00B4  	MOVWF gbl_rx_head
+
+		}
+		//LED_1_PULSE(LED_PULSE_MIDI_IN);
+		pir1.5 = 0;
+06C3  0020  	MOVLB 0x00
+06C4  1291  	BCF gbl_pir1,5
+
+		//P_LED = 1;
+	}
+}
+06AC  0009  	RETFIE
+06C5  0009  	RETFIE
+
+
+void osc_apply(OSCILLATOR *posc) {
+
+	long full_wave = OSC_RESOLUTION/posc->freq;
+0082  0848  	MOVF osc_apply_00000_arg_posc+D'1', W
+0083  0085  	MOVWF FSR0H
+0084  0847  	MOVF osc_apply_00000_arg_posc, W
+0085  0084  	MOVWF FSR0L
+0086  0800  	MOVF INDF0, W
+0087  00D1  	MOVWF __div_32_3_00002_arg_b
+0088  0A84  	INCF FSR0L, F
+0089  01D5  	CLRF CompTempVar579
+008A  3040  	MOVLW 0x40
+008B  00CD  	MOVWF __div_32_3_00002_arg_a
+008C  3042  	MOVLW 0x42
+008D  00CE  	MOVWF __div_32_3_00002_arg_a+D'1'
+008E  300F  	MOVLW 0x0F
+008F  00CF  	MOVWF __div_32_3_00002_arg_a+D'2'
+0090  3000  	MOVLW 0x00
+0091  00D0  	MOVWF __div_32_3_00002_arg_a+D'3'
+0092  0800  	MOVF INDF0, W
+0093  00D2  	MOVWF __div_32_3_00002_arg_b+D'1'
+0094  01D3  	CLRF __div_32_3_00002_arg_b+D'2'
+0095  1B80  	BTFSC INDF0,7
+0096  03D3  	DECF __div_32_3_00002_arg_b+D'2', F
+0097  01D4  	CLRF __div_32_3_00002_arg_b+D'3'
+0098  1B80  	BTFSC INDF0,7
+0099  03D4  	DECF __div_32_3_00002_arg_b+D'3', F
+009A  1F80  	BTFSS INDF0,7
+009B  28A8  	GOTO	label7
+009C  09D1  	COMF __div_32_3_00002_arg_b, F
+009D  09D2  	COMF __div_32_3_00002_arg_b+D'1', F
+009E  09D3  	COMF __div_32_3_00002_arg_b+D'2', F
+009F  09D4  	COMF __div_32_3_00002_arg_b+D'3', F
+00A0  0AD1  	INCF __div_32_3_00002_arg_b, F
+00A1  1903  	BTFSC STATUS,Z
+00A2  0AD2  	INCF __div_32_3_00002_arg_b+D'1', F
+00A3  1903  	BTFSC STATUS,Z
+00A4  0AD3  	INCF __div_32_3_00002_arg_b+D'2', F
+00A5  1903  	BTFSC STATUS,Z
+00A6  0AD4  	INCF __div_32_3_00002_arg_b+D'3', F
+00A7  0AD5  	INCF CompTempVar579, F
+00A8        label7
+00A8  2046  	CALL __div_32_3_00002
+00A9  085C  	MOVF CompTempVarRet141, W
+00AA  00C9  	MOVWF osc_apply_00000_1_full_wave
+00AB  085D  	MOVF CompTempVarRet141+D'1', W
+00AC  00CA  	MOVWF osc_apply_00000_1_full_wave+D'1'
+00AD  085E  	MOVF CompTempVarRet141+D'2', W
+00AE  00CB  	MOVWF osc_apply_00000_1_full_wave+D'2'
+00AF  085F  	MOVF CompTempVarRet141+D'3', W
+00B0  00CC  	MOVWF osc_apply_00000_1_full_wave+D'3'
+00B1  1C55  	BTFSS CompTempVar579,0
+00B2  28BE  	GOTO	label8
+00B3  09C9  	COMF osc_apply_00000_1_full_wave, F
+00B4  09CA  	COMF osc_apply_00000_1_full_wave+D'1', F
+00B5  09CB  	COMF osc_apply_00000_1_full_wave+D'2', F
+00B6  09CC  	COMF osc_apply_00000_1_full_wave+D'3', F
+00B7  0AC9  	INCF osc_apply_00000_1_full_wave, F
+00B8  1903  	BTFSC STATUS,Z
+00B9  0ACA  	INCF osc_apply_00000_1_full_wave+D'1', F
+00BA  1903  	BTFSC STATUS,Z
+00BB  0ACB  	INCF osc_apply_00000_1_full_wave+D'2', F
+00BC  1903  	BTFSC STATUS,Z
+00BD  0ACC  	INCF osc_apply_00000_1_full_wave+D'3', F
+00BE        label8
+
+	while(posc->update);
+00BE  0848  	MOVF osc_apply_00000_arg_posc+D'1', W
+00BF  0085  	MOVWF FSR0H
+00C0  0847  	MOVF osc_apply_00000_arg_posc, W
+00C1  0084  	MOVWF FSR0L
+00C2  300B  	MOVLW 0x0B
+00C3  0784  	ADDWF FSR0L, F
+00C4  0880  	MOVF INDF0, F
+00C5  1D03  	BTFSS STATUS,Z
+00C6  28BE  	GOTO	label8
+
+	if(posc->duty >= 250) {
+00C7  0848  	MOVF osc_apply_00000_arg_posc+D'1', W
+00C8  0085  	MOVWF FSR0H
+00C9  0847  	MOVF osc_apply_00000_arg_posc, W
+00CA  0084  	MOVWF FSR0L
+00CB  3002  	MOVLW 0x02
+00CC  0784  	ADDWF FSR0L, F
+00CD  0800  	MOVF INDF0, W
+00CE  00D6  	MOVWF CompTempVar582
+00CF  0A84  	INCF FSR0L, F
+00D0  0800  	MOVF INDF0, W
+00D1  3A80  	XORLW 0x80
+00D2  00D5  	MOVWF CompTempVar581
+00D3  3080  	MOVLW 0x80
+00D4  0255  	SUBWF CompTempVar581, W
+00D5  1D03  	BTFSS STATUS,Z
+00D6  28D9  	GOTO	label9
+00D7  30FA  	MOVLW 0xFA
+00D8  0256  	SUBWF CompTempVar582, W
+00D9        label9
+00D9  1C03  	BTFSS STATUS,C
+00DA  28F5  	GOTO	label10
+00F5        label10
+
+		posc->next_high_ticks = full_wave;
+00DB  0848  	MOVF osc_apply_00000_arg_posc+D'1', W
+00DC  0085  	MOVWF FSR0H
+00DD  0847  	MOVF osc_apply_00000_arg_posc, W
+00DE  0084  	MOVWF FSR0L
+00DF  300C  	MOVLW 0x0C
+00E0  0784  	ADDWF FSR0L, F
+00E1  0A84  	INCF FSR0L, F
+00E2  0849  	MOVF osc_apply_00000_1_full_wave, W
+00E3  00D5  	MOVWF CompTempVar583
+00E4  084A  	MOVF osc_apply_00000_1_full_wave+D'1', W
+00E5  0080  	MOVWF INDF0
+00E6  0384  	DECF FSR0L, F
+00E7  0855  	MOVF CompTempVar583, W
+00E8  0080  	MOVWF INDF0
+
+		posc->next_low_ticks = 0;
+00E9  0847  	MOVF osc_apply_00000_arg_posc, W
+00EA  0084  	MOVWF FSR0L
+00EB  300E  	MOVLW 0x0E
+00EC  0784  	ADDWF FSR0L, F
+00ED  0A84  	INCF FSR0L, F
+00EE  3000  	MOVLW 0x00
+00EF  00D5  	MOVWF CompTempVar584
+00F0  0180  	CLRF INDF0
+00F1  0384  	DECF FSR0L, F
+00F2  0855  	MOVF CompTempVar584, W
+00F3  0080  	MOVWF INDF0
+
+	}
+	else {
+00F4  2943  	GOTO	label11
+0143        label11
+
+		posc->next_high_ticks = (full_wave * posc->duty)>>8;
+00F5  0848  	MOVF osc_apply_00000_arg_posc+D'1', W
+00F6  0085  	MOVWF FSR0H
+00F7  0847  	MOVF osc_apply_00000_arg_posc, W
+00F8  0084  	MOVWF FSR0L
+00F9  3002  	MOVLW 0x02
+00FA  0784  	ADDWF FSR0L, F
+00FB  0800  	MOVF INDF0, W
+00FC  00DE  	MOVWF __mul_32s__00011_arg_b
+00FD  0A84  	INCF FSR0L, F
+00FE  0849  	MOVF osc_apply_00000_1_full_wave, W
+00FF  00DA  	MOVWF __mul_32s__00011_arg_a
+0100  084A  	MOVF osc_apply_00000_1_full_wave+D'1', W
+0101  00DB  	MOVWF __mul_32s__00011_arg_a+D'1'
+0102  084B  	MOVF osc_apply_00000_1_full_wave+D'2', W
+0103  00DC  	MOVWF __mul_32s__00011_arg_a+D'2'
+0104  084C  	MOVF osc_apply_00000_1_full_wave+D'3', W
+0105  00DD  	MOVWF __mul_32s__00011_arg_a+D'3'
+0106  0800  	MOVF INDF0, W
+0107  00DF  	MOVWF __mul_32s__00011_arg_b+D'1'
+0108  01E0  	CLRF __mul_32s__00011_arg_b+D'2'
+0109  1B80  	BTFSC INDF0,7
+010A  03E0  	DECF __mul_32s__00011_arg_b+D'2', F
+010B  01E1  	CLRF __mul_32s__00011_arg_b+D'3'
+010C  1B80  	BTFSC INDF0,7
+010D  03E1  	DECF __mul_32s__00011_arg_b+D'3', F
+010E  2007  	CALL __mul_32s__00011
+010F  0867  	MOVF CompTempVarRet395, W
+0110  00D5  	MOVWF CompTempVar585
+0111  0868  	MOVF CompTempVarRet395+D'1', W
+0112  00D9  	MOVWF CompTempVar592
+0113  0869  	MOVF CompTempVarRet395+D'2', W
+0114  00D8  	MOVWF CompTempVar589+D'1'
+0115  086A  	MOVF CompTempVarRet395+D'3', W
+0116  00D6  	MOVWF CompTempVar588
+0117  0848  	MOVF osc_apply_00000_arg_posc+D'1', W
+0118  0085  	MOVWF FSR0H
+0119  0847  	MOVF osc_apply_00000_arg_posc, W
+011A  0084  	MOVWF FSR0L
+011B  300C  	MOVLW 0x0C
+011C  0784  	ADDWF FSR0L, F
+011D  0A84  	INCF FSR0L, F
+011E  0858  	MOVF CompTempVar589+D'1', W
+011F  0080  	MOVWF INDF0
+0120  0384  	DECF FSR0L, F
+0121  0859  	MOVF CompTempVar592, W
+0122  0080  	MOVWF INDF0
+
+		posc->next_low_ticks = full_wave - posc->next_high_ticks;	
+0123  0847  	MOVF osc_apply_00000_arg_posc, W
+0124  0084  	MOVWF FSR0L
+0125  300C  	MOVLW 0x0C
+0126  0784  	ADDWF FSR0L, F
+0127  0800  	MOVF INDF0, W
+0128  00D5  	MOVWF CompTempVar594
+0129  0A84  	INCF FSR0L, F
+012A  0800  	MOVF INDF0, W
+012B  00D6  	MOVWF CompTempVar594+D'1'
+012C  01D7  	CLRF CompTempVar594+D'2'
+012D  01D8  	CLRF CompTempVar594+D'3'
+012E  0855  	MOVF CompTempVar594, W
+012F  0249  	SUBWF osc_apply_00000_1_full_wave, W
+0130  00DB  	MOVWF CompTempVar596
+0131  084A  	MOVF osc_apply_00000_1_full_wave+D'1', W
+0132  00DA  	MOVWF CompTempVar595+D'1'
+0133  0856  	MOVF CompTempVar594+D'1', W
+0134  1C03  	BTFSS STATUS,C
+0135  0F56  	INCFSZ CompTempVar594+D'1', W
+0136  02DA  	SUBWF CompTempVar595+D'1', F
+0137  0848  	MOVF osc_apply_00000_arg_posc+D'1', W
+0138  0085  	MOVWF FSR0H
+0139  0847  	MOVF osc_apply_00000_arg_posc, W
+013A  0084  	MOVWF FSR0L
+013B  300E  	MOVLW 0x0E
+013C  0784  	ADDWF FSR0L, F
+013D  0A84  	INCF FSR0L, F
+013E  085A  	MOVF CompTempVar595+D'1', W
+013F  0080  	MOVWF INDF0
+0140  0384  	DECF FSR0L, F
+0141  085B  	MOVF CompTempVar596, W
+0142  0080  	MOVWF INDF0
+
+	}
+	posc->update = 1;
+0143  0848  	MOVF osc_apply_00000_arg_posc+D'1', W
+0144  0085  	MOVWF FSR0H
+0145  0847  	MOVF osc_apply_00000_arg_posc, W
+0146  0084  	MOVWF FSR0L
+0147  300B  	MOVLW 0x0B
+0148  0784  	ADDWF FSR0L, F
+0149  3001  	MOVLW 0x01
+014A  0080  	MOVWF INDF0
+
+	
+}
+014B  0008  	RETURN
+
+void osc_duty(OSCILLATOR *posc, int duty) {
+
+	posc->duty = duty;
+034B  083E  	MOVF osc_duty_00000_arg_posc+D'1', W
+034C  0085  	MOVWF FSR0H
+034D  083D  	MOVF osc_duty_00000_arg_posc, W
+034E  0084  	MOVWF FSR0L
+034F  3002  	MOVLW 0x02
+0350  0784  	ADDWF FSR0L, F
+0351  0A84  	INCF FSR0L, F
+0352  083F  	MOVF osc_duty_00000_arg_duty, W
+0353  00C1  	MOVWF CompTempVar599
+0354  0840  	MOVF osc_duty_00000_arg_duty+D'1', W
+0355  0080  	MOVWF INDF0
+0356  0384  	DECF FSR0L, F
+0357  0841  	MOVF CompTempVar599, W
+0358  0080  	MOVWF INDF0
+
+	osc_apply(posc);
+0359  083D  	MOVF osc_duty_00000_arg_posc, W
+035A  00C7  	MOVWF osc_apply_00000_arg_posc
+035B  083E  	MOVF osc_duty_00000_arg_posc+D'1', W
+035C  00C8  	MOVWF osc_apply_00000_arg_posc+D'1'
+035D  2082  	CALL osc_apply_00000
+
+}
+035E  0008  	RETURN
+
+void osc_play(OSCILLATOR *posc, int freq) {
+
+	posc->freq = freq;
+01D4  0844  	MOVF osc_play_00000_arg_posc+D'1', W
+01D5  0085  	MOVWF FSR0H
+01D6  0843  	MOVF osc_play_00000_arg_posc, W
+01D7  0084  	MOVWF FSR0L
+01D8  0A84  	INCF FSR0L, F
+01D9  0845  	MOVF osc_play_00000_arg_freq, W
+01DA  00C7  	MOVWF CompTempVar600
+01DB  0846  	MOVF osc_play_00000_arg_freq+D'1', W
+01DC  0080  	MOVWF INDF0
+01DD  0384  	DECF FSR0L, F
+01DE  0847  	MOVF CompTempVar600, W
+01DF  0080  	MOVWF INDF0
+
+	osc_apply(posc);
+01E0  0843  	MOVF osc_play_00000_arg_posc, W
+01E1  00C7  	MOVWF osc_apply_00000_arg_posc
+01E2  0844  	MOVF osc_play_00000_arg_posc+D'1', W
+01E3  00C8  	MOVWF osc_apply_00000_arg_posc+D'1'
+01E4  2082  	CALL osc_apply_00000
+
+}
+01E5  0008  	RETURN
+
+void osc_stop(OSCILLATOR *posc) {
+
+	while(posc->update);
+01AB        label22
+01AB  0844  	MOVF osc_stop_00000_arg_posc+D'1', W
+01AC  0085  	MOVWF FSR0H
+01AD  0843  	MOVF osc_stop_00000_arg_posc, W
+01AE  0084  	MOVWF FSR0L
+01AF  300B  	MOVLW 0x0B
+01B0  0784  	ADDWF FSR0L, F
+01B1  0880  	MOVF INDF0, F
+01B2  1D03  	BTFSS STATUS,Z
+01B3  29AB  	GOTO	label22
+
+	posc->next_high_ticks = 0;
+01B4  0844  	MOVF osc_stop_00000_arg_posc+D'1', W
+01B5  0085  	MOVWF FSR0H
+01B6  0843  	MOVF osc_stop_00000_arg_posc, W
+01B7  0084  	MOVWF FSR0L
+01B8  300C  	MOVLW 0x0C
+01B9  0784  	ADDWF FSR0L, F
+01BA  0A84  	INCF FSR0L, F
+01BB  3000  	MOVLW 0x00
+01BC  00C5  	MOVWF CompTempVar601
+01BD  0180  	CLRF INDF0
+01BE  0384  	DECF FSR0L, F
+01BF  0845  	MOVF CompTempVar601, W
+01C0  0080  	MOVWF INDF0
+
+	posc->next_low_ticks = 1000;
+01C1  0843  	MOVF osc_stop_00000_arg_posc, W
+01C2  0084  	MOVWF FSR0L
+01C3  300E  	MOVLW 0x0E
+01C4  0784  	ADDWF FSR0L, F
+01C5  0A84  	INCF FSR0L, F
+01C6  30E8  	MOVLW 0xE8
+01C7  00C5  	MOVWF CompTempVar602
+01C8  3003  	MOVLW 0x03
+01C9  0080  	MOVWF INDF0
+01CA  0384  	DECF FSR0L, F
+01CB  0845  	MOVF CompTempVar602, W
+01CC  0080  	MOVWF INDF0
+
+	posc->update = 1;
+01CD  0843  	MOVF osc_stop_00000_arg_posc, W
+01CE  0084  	MOVWF FSR0L
+01CF  300B  	MOVLW 0x0B
+01D0  0784  	ADDWF FSR0L, F
+01D1  3001  	MOVLW 0x01
+01D2  0080  	MOVWF INDF0
+
+}
+01D3  0008  	RETURN
+
+void osc_init(OSCILLATOR *posc) {
+
+	memset(posc, 0, sizeof(OSCILLATOR));
+0328  083D  	MOVF osc_init_00000_arg_posc, W
+0329  00BF  	MOVWF memset8_00000_arg_ptr
+032A  083E  	MOVF osc_init_00000_arg_posc+D'1', W
+032B  00C0  	MOVWF memset8_00000_arg_ptr+D'1'
+032C  01C1  	CLRF memset8_00000_arg_ch
+032D  3010  	MOVLW 0x10
+032E  00C2  	MOVWF memset8_00000_arg_len
+032F  21E6  	CALL memset8_00000
+
+	posc->freq = 440;
+0330  083E  	MOVF osc_init_00000_arg_posc+D'1', W
+0331  0085  	MOVWF FSR0H
+0332  083D  	MOVF osc_init_00000_arg_posc, W
+0333  0084  	MOVWF FSR0L
+0334  0A84  	INCF FSR0L, F
+0335  30B8  	MOVLW 0xB8
+0336  00BF  	MOVWF CompTempVar603
+0337  3001  	MOVLW 0x01
+0338  0080  	MOVWF INDF0
+0339  0384  	DECF FSR0L, F
+033A  083F  	MOVF CompTempVar603, W
+033B  0080  	MOVWF INDF0
+
+	posc->duty = 128;
+033C  3002  	MOVLW 0x02
+033D  0784  	ADDWF FSR0L, F
+033E  0A84  	INCF FSR0L, F
+033F  3080  	MOVLW 0x80
+0340  00BF  	MOVWF CompTempVar604
+0341  0180  	CLRF INDF0
+0342  0384  	DECF FSR0L, F
+0343  083F  	MOVF CompTempVar604, W
+0344  0080  	MOVWF INDF0
+
+	osc_stop(posc);
+0345  083D  	MOVF osc_init_00000_arg_posc, W
+0346  00C3  	MOVWF osc_stop_00000_arg_posc
+0347  083E  	MOVF osc_init_00000_arg_posc+D'1', W
+0348  00C4  	MOVWF osc_stop_00000_arg_posc+D'1'
+0349  21AB  	CALL osc_stop_00000
+
+}
+034A  0008  	RETURN
+
+
+enum {
+	KNOB_MODE = 1,	//
+	KNOB_FREQ = 3,
+	KNOB_DUTY1 = 0,//
+	KNOB_DUTY2 = 2
+};
+typedef struct {
+	byte config;
+	byte status;
+	unsigned int smoothed;
+	unsigned int result;
+} ADC_CHAN;
+
+ADC_CHAN adc_chan[NUM_ADC_CHANNELS] = {
+	{ADC_2_RA2},
+064F  3009  	MOVLW 0x09
+0650  0020  	MOVLB 0x00
+0651  00E0  	MOVWF gbl_adc_chan
+
+	{ADC_3_RA4},
+0652  300D  	MOVLW 0x0D
+0653  00E6  	MOVWF gbl_adc_chan+D'6'
+
+	{ADC_4_RC0},
+0654  3011  	MOVLW 0x11
+0655  00EC  	MOVWF gbl_adc_chan+D'12'
+
+	{ADC_6_RC2}
+0656  3019  	MOVLW 0x19
+0657  00F2  	MOVWF gbl_adc_chan+D'18'
+
+};
+byte adc_current = 0xFF;
+0658  30FF  	MOVLW 0xFF
+0659  0021  	MOVLB 0x01
+065A  00B9  	MOVWF gbl_adc_current
+
+byte adc_delay = 0; // counter used to force delay for cap to charge
+065B  01BA  	CLRF gbl_adc_delay
+
+
+///////////////////////////////////////////////////////
+// ADC STATE MACHINE
+void adc_run() 
+
+{	
+	if(adc_delay > 0) {	// waiting for ADC acquisition delay
+043A  0021  	MOVLB 0x01
+043B  083A  	MOVF gbl_adc_delay, W
+043C  3C00  	SUBLW 0x00
+043D  1803  	BTFSC STATUS,C
+043E  2C43  	GOTO	label62
+0443        label62
+
+		if(--adc_delay == 0) {
+043F  0BBA  	DECFSZ gbl_adc_delay, F
+
+			// start conversion
+			adcon0.1 = 1;
+0441  149D  	BSF gbl_adcon0,1
+
+		}
+	}
+	else if(!adcon0.1) { // conversion complete
+0443  189D  	BTFSC gbl_adcon0,1
+
+		if(adc_current == 0xFF) { // no result to store
+0445  0A39  	INCF gbl_adc_current, W
+0446  1D03  	BTFSS STATUS,Z
+0447  2C4A  	GOTO	label63
+044A        label63
+
+			adc_current = 0;
+0448  01B9  	CLRF gbl_adc_current
+
+		}
+		else { 
+0449  2D1F  	GOTO	label65
+
+			// format the 10 bit result 
+			adc_chan[adc_current].smoothed = 
+0490  3000  	MOVLW	HIGH(gbl_adc_chan)
+
+0491  0085  	MOVWF FSR0H
+0492  3060  	MOVLW LOW(gbl_adc_chan+D'0')
+0493  0084  	MOVWF FSR0L
+0494  0839  	MOVF gbl_adc_current, W
+0495  00BF  	MOVWF __mul_8_8__00006_arg_a
+0496  3006  	MOVLW 0x06
+0497  00C0  	MOVWF __mul_8_8__00006_arg_b
+0498  22D9  	CALL __mul_8_8__00006
+0499  0867  	MOVF CompTempVarRet381, W
+049A  0784  	ADDWF FSR0L, F
+049B  3002  	MOVLW 0x02
+049C  0784  	ADDWF FSR0L, F
+049D  0A84  	INCF FSR0L, F
+049E  084B  	MOVF CompTempVar615, W
+049F  00CD  	MOVWF CompTempVar630
+04A0  084C  	MOVF CompTempVar615+D'1', W
+04A1  0080  	MOVWF INDF0
+04A2  0384  	DECF FSR0L, F
+04A3  084D  	MOVF CompTempVar630, W
+04A4  0080  	MOVWF INDF0
+
+				(1023 - (adresh << 8 | adresl) + 15*(long)adc_chan[adc_current].smoothed) / 16;
+044A  01CD  	CLRF CompTempVar618
+044B  081C  	MOVF gbl_adresh, W
+044C  00CE  	MOVWF CompTempVar619
+044D  081B  	MOVF gbl_adresl, W
+044E  04CD  	IORWF CompTempVar618, F
+044F  084D  	MOVF CompTempVar618, W
+0450  3CFF  	SUBLW 0xFF
+0451  00E2  	MOVWF CompTempVar622
+0452  084E  	MOVF CompTempVar619, W
+0453  1C03  	BTFSS STATUS,C
+0454  0A4E  	INCF CompTempVar619, W
+0455  3C03  	SUBLW 0x03
+0456  00E3  	MOVWF CompTempVar622+D'1'
+0457  01E4  	CLRF CompTempVar622+D'2'
+0458  01E5  	CLRF CompTempVar622+D'3'
+0459  3000  	MOVLW	HIGH(gbl_adc_chan)
+
+045A  0085  	MOVWF FSR0H
+045B  3060  	MOVLW LOW(gbl_adc_chan+D'0')
+045C  0084  	MOVWF FSR0L
+045D  0839  	MOVF gbl_adc_current, W
+045E  00BF  	MOVWF __mul_8_8__00006_arg_a
+045F  3006  	MOVLW 0x06
+0460  00C0  	MOVWF __mul_8_8__00006_arg_b
+0461  22D9  	CALL __mul_8_8__00006
+0462  0867  	MOVF CompTempVarRet381, W
+0463  0784  	ADDWF FSR0L, F
+0464  3002  	MOVLW 0x02
+0465  0784  	ADDWF FSR0L, F
+0466  0800  	MOVF INDF0, W
+0467  00DE  	MOVWF __mul_32s__00011_arg_b
+0468  0A84  	INCF FSR0L, F
+0469  0800  	MOVF INDF0, W
+046A  00DF  	MOVWF __mul_32s__00011_arg_b+D'1'
+046B  01E0  	CLRF __mul_32s__00011_arg_b+D'2'
+046C  01E1  	CLRF __mul_32s__00011_arg_b+D'3'
+046D  0384  	DECF FSR0L, F
+046E  300F  	MOVLW 0x0F
+046F  00DA  	MOVWF __mul_32s__00011_arg_a
+0470  01DB  	CLRF __mul_32s__00011_arg_a+D'1'
+0471  01DC  	CLRF __mul_32s__00011_arg_a+D'2'
+0472  01DD  	CLRF __mul_32s__00011_arg_a+D'3'
+0473  2007  	CALL __mul_32s__00011
+0474  0867  	MOVF CompTempVarRet395, W
+0475  00CB  	MOVWF CompTempVar615
+0476  0868  	MOVF CompTempVarRet395+D'1', W
+0477  00CC  	MOVWF CompTempVar615+D'1'
+0478  0869  	MOVF CompTempVarRet395+D'2', W
+0479  00CA  	MOVWF CompTempVar614
+047A  086A  	MOVF CompTempVarRet395+D'3', W
+047B  00C9  	MOVWF CompTempVar613
+047C  0862  	MOVF CompTempVar622, W
+047D  07CB  	ADDWF CompTempVar615, F
+047E  0863  	MOVF CompTempVar622+D'1', W
+047F  3DCC  	ADDWFC CompTempVar615+D'1', F
+0480  0864  	MOVF CompTempVar622+D'2', W
+0481  3DCA  	ADDWFC CompTempVar614, F
+0482  0865  	MOVF CompTempVar622+D'3', W
+0483  3DC9  	ADDWFC CompTempVar613, F
+0484  0CCA  	RRF CompTempVar614, F
+0485  0CCC  	RRF CompTempVar615+D'1', F
+0486  0CCB  	RRF CompTempVar615, F
+0487  0CCA  	RRF CompTempVar614, F
+0488  0CCC  	RRF CompTempVar615+D'1', F
+0489  0CCB  	RRF CompTempVar615, F
+048A  0CCA  	RRF CompTempVar614, F
+048B  0CCC  	RRF CompTempVar615+D'1', F
+048C  0CCB  	RRF CompTempVar615, F
+048D  0CCA  	RRF CompTempVar614, F
+048E  0CCC  	RRF CompTempVar615+D'1', F
+048F  0CCB  	RRF CompTempVar615, F
+
+			
+			int d = adc_chan[adc_current].smoothed - adc_chan[adc_current].result;
+04A5  3000  	MOVLW	HIGH(gbl_adc_chan)
+
+04A6  0085  	MOVWF FSR0H
+04A7  3060  	MOVLW LOW(gbl_adc_chan+D'0')
+04A8  0084  	MOVWF FSR0L
+04A9  0839  	MOVF gbl_adc_current, W
+04AA  00BF  	MOVWF __mul_8_8__00006_arg_a
+04AB  3006  	MOVLW 0x06
+04AC  00C0  	MOVWF __mul_8_8__00006_arg_b
+04AD  22D9  	CALL __mul_8_8__00006
+04AE  0867  	MOVF CompTempVarRet381, W
+04AF  0784  	ADDWF FSR0L, F
+04B0  3004  	MOVLW 0x04
+04B1  0784  	ADDWF FSR0L, F
+04B2  0800  	MOVF INDF0, W
+04B3  00C1  	MOVWF CompTempVar605
+04B4  0A84  	INCF FSR0L, F
+04B5  0800  	MOVF INDF0, W
+04B6  00C2  	MOVWF CompTempVar605+D'1'
+04B7  3000  	MOVLW	HIGH(gbl_adc_chan)
+
+04B8  0085  	MOVWF FSR0H
+04B9  3060  	MOVLW LOW(gbl_adc_chan+D'0')
+04BA  0084  	MOVWF FSR0L
+04BB  0839  	MOVF gbl_adc_current, W
+04BC  00BF  	MOVWF __mul_8_8__00006_arg_a
+04BD  3006  	MOVLW 0x06
+04BE  00C0  	MOVWF __mul_8_8__00006_arg_b
+04BF  22D9  	CALL __mul_8_8__00006
+04C0  0867  	MOVF CompTempVarRet381, W
+04C1  0784  	ADDWF FSR0L, F
+04C2  3002  	MOVLW 0x02
+04C3  0784  	ADDWF FSR0L, F
+04C4  0800  	MOVF INDF0, W
+04C5  00BD  	MOVWF adc_run_00000_8_d
+04C6  0A84  	INCF FSR0L, F
+04C7  0841  	MOVF CompTempVar605, W
+04C8  02BD  	SUBWF adc_run_00000_8_d, F
+04C9  0842  	MOVF CompTempVar605+D'1', W
+04CA  3B00  	SUBWFB INDF0, W
+04CB  00BE  	MOVWF adc_run_00000_8_d+D'1'
+
+			if(d*d > 1) {
+04CC  083D  	MOVF adc_run_00000_8_d, W
+04CD  00C3  	MOVWF __mul_16s__0000F_arg_a
+04CE  083E  	MOVF adc_run_00000_8_d+D'1', W
+04CF  00C4  	MOVWF __mul_16s__0000F_arg_a+D'1'
+04D0  083D  	MOVF adc_run_00000_8_d, W
+04D1  00C5  	MOVWF __mul_16s__0000F_arg_b
+04D2  083E  	MOVF adc_run_00000_8_d+D'1', W
+04D3  00C6  	MOVWF __mul_16s__0000F_arg_b+D'1'
+04D4  22E6  	CALL __mul_16s__0000F
+04D5  084C  	MOVF CompTempVarRet391, W
+04D6  00C7  	MOVWF CompTempVar608
+04D7  084D  	MOVF CompTempVarRet391+D'1', W
+04D8  00C8  	MOVWF CompTempVar609
+04D9  0847  	MOVF CompTempVar608, W
+04DA  3C01  	SUBLW 0x01
+04DB  0848  	MOVF CompTempVar609, W
+04DC  1803  	BTFSC STATUS,C
+04DD  1D03  	BTFSS STATUS,Z
+04DE  1BC8  	BTFSC CompTempVar609,7
+04DF  2D19  	GOTO	label64
+0519        label64
+
+				adc_chan[adc_current].result = adc_chan[adc_current].smoothed;
+04E0  3000  	MOVLW	HIGH(gbl_adc_chan)
+
+04E1  0085  	MOVWF FSR0H
+04E2  3060  	MOVLW LOW(gbl_adc_chan+D'0')
+04E3  0084  	MOVWF FSR0L
+04E4  0839  	MOVF gbl_adc_current, W
+04E5  00BF  	MOVWF __mul_8_8__00006_arg_a
+04E6  3006  	MOVLW 0x06
+04E7  00C0  	MOVWF __mul_8_8__00006_arg_b
+04E8  22D9  	CALL __mul_8_8__00006
+04E9  0867  	MOVF CompTempVarRet381, W
+04EA  00C9  	MOVWF CompTempVar633
+04EB  0849  	MOVF CompTempVar633, W
+04EC  0784  	ADDWF FSR0L, F
+04ED  3002  	MOVLW 0x02
+04EE  0784  	ADDWF FSR0L, F
+04EF  0800  	MOVF INDF0, W
+04F0  00CA  	MOVWF CompTempVar634
+04F1  0A84  	INCF FSR0L, F
+04F2  0800  	MOVF INDF0, W
+04F3  00CB  	MOVWF CompTempVar634+D'1'
+04F4  3000  	MOVLW	HIGH(gbl_adc_chan)
+
+04F5  0085  	MOVWF FSR0H
+04F6  3060  	MOVLW LOW(gbl_adc_chan+D'0')
+04F7  0084  	MOVWF FSR0L
+04F8  0839  	MOVF gbl_adc_current, W
+04F9  00BF  	MOVWF __mul_8_8__00006_arg_a
+04FA  3006  	MOVLW 0x06
+04FB  00C0  	MOVWF __mul_8_8__00006_arg_b
+04FC  22D9  	CALL __mul_8_8__00006
+04FD  0867  	MOVF CompTempVarRet381, W
+04FE  0784  	ADDWF FSR0L, F
+04FF  3004  	MOVLW 0x04
+0500  0784  	ADDWF FSR0L, F
+0501  0A84  	INCF FSR0L, F
+0502  084A  	MOVF CompTempVar634, W
+0503  00CC  	MOVWF CompTempVar636
+0504  084B  	MOVF CompTempVar634+D'1', W
+0505  0080  	MOVWF INDF0
+0506  0384  	DECF FSR0L, F
+0507  084C  	MOVF CompTempVar636, W
+0508  0080  	MOVWF INDF0
+
+				adc_chan[adc_current].status = 1;
+0509  3000  	MOVLW	HIGH(gbl_adc_chan)
+
+050A  0085  	MOVWF FSR0H
+050B  3060  	MOVLW LOW(gbl_adc_chan+D'0')
+050C  0084  	MOVWF FSR0L
+050D  0839  	MOVF gbl_adc_current, W
+050E  00BF  	MOVWF __mul_8_8__00006_arg_a
+050F  3006  	MOVLW 0x06
+0510  00C0  	MOVWF __mul_8_8__00006_arg_b
+0511  22D9  	CALL __mul_8_8__00006
+0512  0867  	MOVF CompTempVarRet381, W
+0513  0784  	ADDWF FSR0L, F
+0514  0A84  	INCF FSR0L, F
+0515  3001  	MOVLW 0x01
+0516  0080  	MOVWF INDF0
+
+P_LED = 1;				
+0517  0022  	MOVLB 0x02
+0518  168C  	BSF gbl_lata,5
+
+			}
+				
+			// next channel
+			if(++adc_current >= NUM_ADC_CHANNELS) {
+0519  0021  	MOVLB 0x01
+051A  0AB9  	INCF gbl_adc_current, F
+051B  3004  	MOVLW 0x04
+051C  0239  	SUBWF gbl_adc_current, W
+051D  1803  	BTFSC STATUS,C
+
+				adc_current = 0;
+051E  01B9  	CLRF gbl_adc_current
+051F        label65
+
+			}
+		}
+		
+		// connect ADC to appropriate channel
+		adcon0 = adc_chan[adc_current].config;
+051F  3000  	MOVLW	HIGH(gbl_adc_chan)
+
+0520  0085  	MOVWF FSR0H
+0521  3060  	MOVLW LOW(gbl_adc_chan+D'0')
+0522  0084  	MOVWF FSR0L
+0523  0839  	MOVF gbl_adc_current, W
+0524  00BF  	MOVWF __mul_8_8__00006_arg_a
+0525  3006  	MOVLW 0x06
+0526  00C0  	MOVWF __mul_8_8__00006_arg_b
+0527  22D9  	CALL __mul_8_8__00006
+0528  0867  	MOVF CompTempVarRet381, W
+0529  0784  	ADDWF FSR0L, F
+052A  0800  	MOVF INDF0, W
+052B  009D  	MOVWF gbl_adcon0
+
+		
+		// force a delay before we start the conversion
+		// to give time for ADC sample and hold cap to charge
+		adc_delay = 10;
+052C  300A  	MOVLW 0x0A
+052D  00BA  	MOVWF gbl_adc_delay
+
+	}
+}
+0440  0008  	RETURN
+0442  0008  	RETURN
+0444  0008  	RETURN
+052E  0008  	RETURN
+
+
+
+
+
+
+////////////////////////////////////////////////////////////
+// INITIALISE SERIAL PORT FOR MIDI
+void uart_init()
+
+{
+	pir1.1 = 0;		//TXIF 		
+030F  0020  	MOVLB 0x00
+0310  1091  	BCF gbl_pir1,1
+
+	pir1.5 = 0;		//RCIF
+0311  1291  	BCF gbl_pir1,5
+
+	
+	pie1.1 = 0;		//TXIE 		no interrupts
+0312  0021  	MOVLB 0x01
+0313  1091  	BCF gbl_pie1,1
+
+	pie1.5 = 1;		//RCIE 		enable
+0314  1691  	BSF gbl_pie1,5
+
+	
+	baudcon.4 = 0;	// SCKP		synchronous bit polarity 
+0315  0023  	MOVLB 0x03
+0316  121F  	BCF gbl_baudcon,4
+
+	baudcon.3 = 1;	// BRG16	enable 16 bit brg
+0317  159F  	BSF gbl_baudcon,3
+
+	baudcon.1 = 0;	// WUE		wake up enable off
+0318  109F  	BCF gbl_baudcon,1
+
+	baudcon.0 = 0;	// ABDEN	auto baud detect
+0319  101F  	BCF gbl_baudcon,0
+
+		
+	txsta.6 = 0;	// TX9		8 bit transmission
+031A  131E  	BCF gbl_txsta,6
+
+	txsta.5 = 0;	// TXEN		transmit enable
+031B  129E  	BCF gbl_txsta,5
+
+	txsta.4 = 0;	// SYNC		async mode
+031C  121E  	BCF gbl_txsta,4
+
+	txsta.3 = 0;	// SEDNB	break character
+031D  119E  	BCF gbl_txsta,3
+
+	txsta.2 = 0;	// BRGH		high baudrate 
+031E  111E  	BCF gbl_txsta,2
+
+	txsta.0 = 0;	// TX9D		bit 9
+031F  101E  	BCF gbl_txsta,0
+
+
+	rcsta.7 = 1;	// SPEN 	serial port enable
+0320  179D  	BSF gbl_rcsta,7
+
+	rcsta.6 = 0;	// RX9 		8 bit operation
+0321  131D  	BCF gbl_rcsta,6
+
+	rcsta.5 = 1;	// SREN 	enable receiver
+0322  169D  	BSF gbl_rcsta,5
+
+	rcsta.4 = 1;	// CREN 	continuous receive enable
+0323  161D  	BSF gbl_rcsta,4
+
+		
+	spbrgh = 0;		// brg high byte
+0324  019C  	CLRF gbl_spbrgh
+
+	spbrg = 31;		// brg low byte (31250)	
+0325  301F  	MOVLW 0x1F
+0326  009B  	MOVWF gbl_spbrg
+
+	
+}
+0327  0008  	RETURN
+
+
+////////////////////////////////////////////////////////////
+// GET MESSAGES FROM MIDI INPUT
+byte midi_in()
+
+{
+	// loop until there is no more data or
+	// we receive a full message
+	for(;;)
+03A1        label51
+
+	{
+		// usart buffer overrun error?
+		if(rcsta.1)
+03A1  0023  	MOVLB 0x03
+03A2  1C9D  	BTFSS gbl_rcsta,1
+03A3  2BA6  	GOTO	label52
+03A6        label52
+
+		{
+			rcsta.4 = 0;
+03A4  121D  	BCF gbl_rcsta,4
+
+			rcsta.4 = 1;
+03A5  161D  	BSF gbl_rcsta,4
+
+		}
+		
+		// check for empty receive buffer
+		if(rx_head == rx_tail)
+03A6  0021  	MOVLB 0x01
+03A7  0835  	MOVF gbl_rx_tail, W
+03A8  0634  	XORWF gbl_rx_head, W
+03A9  1D03  	BTFSS STATUS,Z
+03AA  2BAD  	GOTO	label53
+03AD        label53
+
+			return 0;
+03AB  01C3  	CLRF CompTempVarRet637
+
+		
+		// read the character out of buffer
+		byte ch = rx_buffer[rx_tail];
+03AD  3000  	MOVLW	HIGH(gbl_rx_buffer)
+
+03AE  0085  	MOVWF FSR0H
+03AF  3020  	MOVLW LOW(gbl_rx_buffer+D'0')
+03B0  0084  	MOVWF FSR0L
+03B1  0835  	MOVF gbl_rx_tail, W
+03B2  0784  	ADDWF FSR0L, F
+03B3  0800  	MOVF INDF0, W
+03B4  00BF  	MOVWF midi_in_00000_3_ch
+
+		++rx_tail;
+03B5  0AB5  	INCF gbl_rx_tail, F
+
+		rx_tail&=SZ_RXBUFFER_MASK;
+03B6  303F  	MOVLW 0x3F
+03B7  05B5  	ANDWF gbl_rx_tail, F
+
+
+		// SYSTEM MESSAGE
+		if((ch & 0xf0) == 0xf0)
+03B8  30F0  	MOVLW 0xF0
+03B9  053F  	ANDWF midi_in_00000_3_ch, W
+03BA  00C0  	MOVWF CompTempVar639
+03BB  0840  	MOVF CompTempVar639, W
+03BC  3AF0  	XORLW 0xF0
+03BD  1D03  	BTFSS STATUS,Z
+03BE  2BE6  	GOTO	label57
+03E6        label57
+
+		{
+			switch(ch)
+03D5  2BA1  	GOTO	label51
+
+			{
+			// RELEVANT REALTIME MESSAGE 
+			case MIDI_SYNCH_TICK:
+03BF  083F  	MOVF midi_in_00000_3_ch, W
+03C0  3AF8  	XORLW 0xF8
+03C1  1903  	BTFSC STATUS,Z
+03C2  2BD6  	GOTO	label54
+03D6        label54
+
+			case MIDI_SYNCH_START:
+03C3  3A02  	XORLW 0x02
+03C4  1903  	BTFSC STATUS,Z
+03C5  2BD6  	GOTO	label54
+
+			case MIDI_SYNCH_CONTINUE:
+03C6  3A01  	XORLW 0x01
+03C7  1903  	BTFSC STATUS,Z
+03C8  2BD6  	GOTO	label54
+
+			case MIDI_SYNCH_STOP:
+03C9  3A07  	XORLW 0x07
+03CA  1903  	BTFSC STATUS,Z
+03CB  2BD6  	GOTO	label54
+
+				return ch;		
+03D6  083F  	MOVF midi_in_00000_3_ch, W
+03D7  00C3  	MOVWF CompTempVarRet637
+
+			// SYSTEM COMMON MESSAGES WITH PARAMETERS
+			case MIDI_MTC_QTR_FRAME:	// 1 param byte follows
+03CC  3A0D  	XORLW 0x0D
+03CD  1903  	BTFSC STATUS,Z
+03CE  2BD9  	GOTO	label55
+03D9        label55
+
+			case MIDI_SONG_SELECT:		// 1 param byte follows			
+03CF  3A02  	XORLW 0x02
+03D0  1903  	BTFSC STATUS,Z
+03D1  2BD9  	GOTO	label55
+
+			case MIDI_SPP:				// 2 param bytes follow
+03D2  3A01  	XORLW 0x01
+03D3  1903  	BTFSC STATUS,Z
+03D4  2BD9  	GOTO	label55
+
+				midi_param = 0;
+03D9  01B8  	CLRF gbl_midi_param
+
+				midi_status = ch; 
+03DA  083F  	MOVF midi_in_00000_3_ch, W
+03DB  00B6  	MOVWF gbl_midi_status
+
+				midi_num_params = (ch==MIDI_SPP)? 2:1;
+03DC  083F  	MOVF midi_in_00000_3_ch, W
+03DD  3AF2  	XORLW 0xF2
+03DE  1D03  	BTFSS STATUS,Z
+03DF  2BE3  	GOTO	label56
+03E0  3002  	MOVLW 0x02
+03E1  00B7  	MOVWF gbl_midi_num_params
+03E2  2BA1  	GOTO	label51
+03E3        label56
+03E3  3001  	MOVLW 0x01
+03E4  00B7  	MOVWF gbl_midi_num_params
+
+				break;
+			}
+			// Ignoring....			
+			//  0xF4	RESERVED
+			//  0xF5	RESERVED
+			//  0xF6	TUNE REQUEST
+			//	0xF9	RESERVED
+			//	0xFD	RESERVED
+			//	0xFE	ACTIVE SENSING
+			//	0xFF	RESET
+		}    
+		// STATUS BYTE
+		else if(!!(ch & 0x80))
+03E5  2BA1  	GOTO	label51
+03E6  3080  	MOVLW 0x80
+03E7  053F  	ANDWF midi_in_00000_3_ch, W
+03E8  00C1  	MOVWF CompTempVar642
+03E9  01C2  	CLRF CompTempVar643
+03EA  08C1  	MOVF CompTempVar642, F
+03EB  1903  	BTFSC STATUS,Z
+03EC  0AC2  	INCF CompTempVar643, F
+03ED  08C2  	MOVF CompTempVar643, F
+03EE  1D03  	BTFSS STATUS,Z
+03EF  2C13  	GOTO	label60
+0413        label60
+
+		{
+			midi_param = 0;
+03F0  01B8  	CLRF gbl_midi_param
+
+			midi_status = ch; 
+03F1  083F  	MOVF midi_in_00000_3_ch, W
+03F2  00B6  	MOVWF gbl_midi_status
+
+			switch(ch & 0xF0)
+03F3  30F0  	MOVLW 0xF0
+03F4  053F  	ANDWF midi_in_00000_3_ch, W
+03F5  00C4  	MOVWF CompTempVar645
+
+			{
+			case 0xC0: //  Patch change  1  instrument #   
+03F6  0844  	MOVF CompTempVar645, W
+03F7  3AC0  	XORLW 0xC0
+03F8  1903  	BTFSC STATUS,Z
+03F9  2C0D  	GOTO	label58
+040D        label58
+
+			case 0xD0: //  Channel Pressure  1  pressure  
+03FA  3A10  	XORLW 0x10
+03FB  1903  	BTFSC STATUS,Z
+03FC  2C0D  	GOTO	label58
+
+				midi_num_params = 1;
+040D  3001  	MOVLW 0x01
+040E  00B7  	MOVWF gbl_midi_num_params
+
+				break;    
+040F  2BA1  	GOTO	label51
+
+			case 0xA0: //  Polyphonic aftertouch  2  key  touch  
+03FD  3A70  	XORLW 0x70
+03FE  1903  	BTFSC STATUS,Z
+03FF  2C10  	GOTO	label59
+0410        label59
+
+			case 0x80: //  Note-off  2  key  velocity  
+0400  3A20  	XORLW 0x20
+0401  1903  	BTFSC STATUS,Z
+0402  2C10  	GOTO	label59
+
+			case 0x90: //  Note-on  2  key  veolcity  
+0403  3A10  	XORLW 0x10
+0404  1903  	BTFSC STATUS,Z
+0405  2C10  	GOTO	label59
+
+			case 0xB0: //  Continuous controller  2  controller #  controller value  
+0406  3A20  	XORLW 0x20
+0407  1903  	BTFSC STATUS,Z
+0408  2C10  	GOTO	label59
+
+			case 0xE0: //  Pitch bend  2  lsb (7 bits)  msb (7 bits)  
+0409  3A50  	XORLW 0x50
+040A  1903  	BTFSC STATUS,Z
+040B  2C10  	GOTO	label59
+
+			default:
+040C  2C10  	GOTO	label59
+
+				midi_num_params = 2;
+0410  3002  	MOVLW 0x02
+0411  00B7  	MOVWF gbl_midi_num_params
+
+				break;        
+			}
+		}    
+		else 
+0412  2BA1  	GOTO	label51
+
+		{
+			if(midi_status)
+0413  08B6  	MOVF gbl_midi_status, F
+0414  1903  	BTFSC STATUS,Z
+0415  2BA1  	GOTO	label51
+
+			{
+				// gathering parameters
+				midi_params[midi_param++] = ch;
+0416  3000  	MOVLW	HIGH(gbl_midi_params)
+
+0417  0085  	MOVWF FSR0H
+0418  30B0  	MOVLW LOW(gbl_midi_params+D'0')
+0419  0084  	MOVWF FSR0L
+041A  0838  	MOVF gbl_midi_param, W
+041B  0AB8  	INCF gbl_midi_param, F
+041C  0784  	ADDWF FSR0L, F
+041D  083F  	MOVF midi_in_00000_3_ch, W
+041E  0080  	MOVWF INDF0
+
+				if(midi_param >= midi_num_params)
+041F  0837  	MOVF gbl_midi_num_params, W
+0420  0238  	SUBWF gbl_midi_param, W
+0421  1C03  	BTFSS STATUS,C
+0422  2BA1  	GOTO	label51
+
+				{
+					// we have a complete message.. is it one we care about?
+					midi_param = 0;
+0423  01B8  	CLRF gbl_midi_param
+
+					switch(midi_status&0xF0)
+0424  30F0  	MOVLW 0xF0
+0425  0536  	ANDWF gbl_midi_status, W
+0426  00C4  	MOVWF CompTempVar648
+0436  2BA1  	GOTO	label51
+0437        label61
+
+					{
+					case 0x80: // note off
+0427  0844  	MOVF CompTempVar648, W
+0428  3A80  	XORLW 0x80
+0429  1903  	BTFSC STATUS,Z
+042A  2C37  	GOTO	label61
+
+					case 0x90: // note on
+042B  3A10  	XORLW 0x10
+042C  1903  	BTFSC STATUS,Z
+042D  2C37  	GOTO	label61
+
+					case 0xE0: // pitch bend
+042E  3A70  	XORLW 0x70
+042F  1903  	BTFSC STATUS,Z
+0430  2C37  	GOTO	label61
+
+					case 0xB0: // cc
+0431  3A50  	XORLW 0x50
+0432  1903  	BTFSC STATUS,Z
+0433  2C37  	GOTO	label61
+
+					case 0xD0: // channel pressure
+0434  3A60  	XORLW 0x60
+0435  1D03  	BTFSS STATUS,Z
+
+						return midi_status; 
+0437  0836  	MOVF gbl_midi_status, W
+0438  00C3  	MOVWF CompTempVarRet637
+
+					}
+				}
+			}
+		}
+	}
+	// no message ready yet
+	return 0;
+
+}
+03AC  0008  	RETURN
+03D8  0008  	RETURN
+0439  0008  	RETURN
+
+
+
+#define MAX_NOTES 8
+int note_count = 0;
+065C  01B2  	CLRF gbl_note_count
+065D  01B3  	CLRF gbl_note_count+D'1'
+
+byte note_held[MAX_NOTES];
+
+static byte add_note(byte note) {
+
+	char i;
+
+	// if the note is already at top of stack
+	// there is nothing to do
+	if(note_count>0 && note == note_held) {
+0259  0832  	MOVF gbl_note_count, W
+025A  3C00  	SUBLW 0x00
+025B  0833  	MOVF gbl_note_count+D'1', W
+025C  1803  	BTFSC STATUS,C
+025D  1D03  	BTFSS STATUS,Z
+025E  1BB3  	BTFSC gbl_note_count+D'1',7
+025F  2A6C  	GOTO	label28
+0260  3000  	MOVLW HIGH(gbl_note_held+D'0')
+0261  00C6  	MOVWF CompTempVar653
+0262  3078  	MOVLW LOW(gbl_note_held+D'0')
+0263  00C5  	MOVWF CompTempVar652
+0264  0843  	MOVF add_note_00000_arg_note, W
+0265  0645  	XORWF CompTempVar652, W
+0266  1903  	BTFSC STATUS,Z
+0267  0846  	MOVF CompTempVar653, W
+0268  1D03  	BTFSS STATUS,Z
+0269  2A6C  	GOTO	label28
+026C        label28
+
+		return 0;
+026A  01C7  	CLRF CompTempVarRet649
+
+	}
+	
+	// check if note is already in the stack
+	for(i = 0; i < note_count; ++i) {
+026C  01C4  	CLRF add_note_00000_1_i
+026D        label29
+026D  0832  	MOVF gbl_note_count, W
+026E  0244  	SUBWF add_note_00000_1_i, W
+026F  0833  	MOVF gbl_note_count+D'1', W
+0270  1803  	BTFSC STATUS,C
+0271  1D03  	BTFSS STATUS,Z
+0272  1BB3  	BTFSC gbl_note_count+D'1',7
+0273  2A9B  	GOTO	label33
+0299  0AC4  	INCF add_note_00000_1_i, F
+029A  2A6D  	GOTO	label29
+029B        label33
+
+		if(note_held[i] == note) { // found it
+0274  3000  	MOVLW	HIGH(gbl_note_held)
+
+0275  0085  	MOVWF FSR0H
+0276  3078  	MOVLW LOW(gbl_note_held+D'0')
+0277  0084  	MOVWF FSR0L
+0278  0844  	MOVF add_note_00000_1_i, W
+0279  0784  	ADDWF FSR0L, F
+027A  0843  	MOVF add_note_00000_arg_note, W
+027B  0600  	XORWF INDF0, W
+027C  1D03  	BTFSS STATUS,Z
+027D  2A99  	GOTO	label32
+027E        label30
+0299        label32
+
+			// shuffle all lower indexed notes up one place
+			for(; i > 0; --i) {
+027E  0844  	MOVF add_note_00000_1_i, W
+027F  3C00  	SUBLW 0x00
+0280  1803  	BTFSC STATUS,C
+0281  2A94  	GOTO	label31
+0292  03C4  	DECF add_note_00000_1_i, F
+0293  2A7E  	GOTO	label30
+0294        label31
+02B8  2AA3  	GOTO	label34
+
+				note_held[i] = note_held[i-1];
+0282  3000  	MOVLW	HIGH(gbl_note_held)
+
+0283  0085  	MOVWF FSR0H
+0284  3078  	MOVLW LOW(gbl_note_held+D'0')
+0285  0084  	MOVWF FSR0L
+0286  0344  	DECF add_note_00000_1_i, W
+0287  00C8  	MOVWF CompTempVar657
+0288  0848  	MOVF CompTempVar657, W
+0289  0784  	ADDWF FSR0L, F
+028A  0800  	MOVF INDF0, W
+028B  00C9  	MOVWF CompTempVar658
+028C  3078  	MOVLW LOW(gbl_note_held+D'0')
+028D  0084  	MOVWF FSR0L
+028E  0844  	MOVF add_note_00000_1_i, W
+028F  0784  	ADDWF FSR0L, F
+0290  0849  	MOVF CompTempVar658, W
+0291  0080  	MOVWF INDF0
+
+			}
+			// and place this note at the front
+			note_held[0] = note;
+0294  0843  	MOVF add_note_00000_arg_note, W
+0295  00F8  	MOVWF gbl_note_held
+
+			return 1;
+0296  3001  	MOVLW 0x01
+0297  00C7  	MOVWF CompTempVarRet649
+
+		}
+	}
+
+	// is the note stack full?
+	if(note_count == MAX_NOTES) { 
+029B  3008  	MOVLW 0x08
+029C  0632  	XORWF gbl_note_count, W
+029D  1903  	BTFSC STATUS,Z
+029E  0833  	MOVF gbl_note_count+D'1', W
+029F  1D03  	BTFSS STATUS,Z
+02A0  2AB9  	GOTO	label35
+02B9        label35
+
+		// ok, we're going to lose the oldest note
+		for(i = MAX_NOTES-1; i > 0; --i) {
+02A1  3007  	MOVLW 0x07
+02A2  00C4  	MOVWF add_note_00000_1_i
+02A3        label34
+02A3  0844  	MOVF add_note_00000_1_i, W
+02A4  3C00  	SUBLW 0x00
+02A5  1803  	BTFSC STATUS,C
+02A6  2AD4  	GOTO	label38
+02B7  03C4  	DECF add_note_00000_1_i, F
+
+			note_held[i] = note_held[i-1];
+02A7  3000  	MOVLW	HIGH(gbl_note_held)
+
+02A8  0085  	MOVWF FSR0H
+02A9  3078  	MOVLW LOW(gbl_note_held+D'0')
+02AA  0084  	MOVWF FSR0L
+02AB  0344  	DECF add_note_00000_1_i, W
+02AC  00C8  	MOVWF CompTempVar662
+02AD  0848  	MOVF CompTempVar662, W
+02AE  0784  	ADDWF FSR0L, F
+02AF  0800  	MOVF INDF0, W
+02B0  00C9  	MOVWF CompTempVar663
+02B1  3078  	MOVLW LOW(gbl_note_held+D'0')
+02B2  0084  	MOVWF FSR0L
+02B3  0844  	MOVF add_note_00000_1_i, W
+02B4  0784  	ADDWF FSR0L, F
+02B5  0849  	MOVF CompTempVar663, W
+02B6  0080  	MOVWF INDF0
+
+		}
+	}
+	else {
+		// otherwise make space for the new note
+		for(i = note_count; i > 0; --i) {
+02B9  0832  	MOVF gbl_note_count, W
+02BA  00C4  	MOVWF add_note_00000_1_i
+02BB        label36
+02BB  0844  	MOVF add_note_00000_1_i, W
+02BC  3C00  	SUBLW 0x00
+02BD  1803  	BTFSC STATUS,C
+02BE  2AD1  	GOTO	label37
+02CF  03C4  	DECF add_note_00000_1_i, F
+02D0  2ABB  	GOTO	label36
+02D1        label37
+
+			note_held[i] = note_held[i-1];
+02BF  3000  	MOVLW	HIGH(gbl_note_held)
+
+02C0  0085  	MOVWF FSR0H
+02C1  3078  	MOVLW LOW(gbl_note_held+D'0')
+02C2  0084  	MOVWF FSR0L
+02C3  0344  	DECF add_note_00000_1_i, W
+02C4  00C8  	MOVWF CompTempVar666
+02C5  0848  	MOVF CompTempVar666, W
+02C6  0784  	ADDWF FSR0L, F
+02C7  0800  	MOVF INDF0, W
+02C8  00C9  	MOVWF CompTempVar667
+02C9  3078  	MOVLW LOW(gbl_note_held+D'0')
+02CA  0084  	MOVWF FSR0L
+02CB  0844  	MOVF add_note_00000_1_i, W
+02CC  0784  	ADDWF FSR0L, F
+02CD  0849  	MOVF CompTempVar667, W
+02CE  0080  	MOVWF INDF0
+
+		}
+		++note_count;
+02D1  0AB2  	INCF gbl_note_count, F
+02D2  1903  	BTFSC STATUS,Z
+02D3  0AB3  	INCF gbl_note_count+D'1', F
+02D4        label38
+
+	}
+	// add the new note
+	note_held[0] = note;	
+02D4  0843  	MOVF add_note_00000_arg_note, W
+02D5  00F8  	MOVWF gbl_note_held
+
+	return 1;
+02D6  3001  	MOVLW 0x01
+02D7  00C7  	MOVWF CompTempVarRet649
+
+}
+026B  0008  	RETURN
+0298  0008  	RETURN
+02D8  0008  	RETURN
+
+
+///////////////////////////////////////////////////////////////
+// REMOVE A NOTE FROM A STACK
+static byte remove_note(byte note) 
+
+{
+	char i;
+	
+	// search for the note
+	for(i = 0; i < note_count; ++i) {
+0174  01C4  	CLRF remove_not_00013_1_i
+0175        label16
+0175  0832  	MOVF gbl_note_count, W
+0176  0244  	SUBWF remove_not_00013_1_i, W
+0177  0833  	MOVF gbl_note_count+D'1', W
+0178  1803  	BTFSC STATUS,C
+0179  1D03  	BTFSS STATUS,Z
+017A  1BB3  	BTFSC gbl_note_count+D'1',7
+017B  29A9  	GOTO	label21
+01A7  0AC4  	INCF remove_not_00013_1_i, F
+01A8  2975  	GOTO	label16
+01A9        label21
+
+		if(note_held[i] == note) { 
+017C  3000  	MOVLW	HIGH(gbl_note_held)
+
+017D  0085  	MOVWF FSR0H
+017E  3078  	MOVLW LOW(gbl_note_held+D'0')
+017F  0084  	MOVWF FSR0L
+0180  0844  	MOVF remove_not_00013_1_i, W
+0181  0784  	ADDWF FSR0L, F
+0182  0843  	MOVF remove_not_00013_arg_note, W
+0183  0600  	XORWF INDF0, W
+0184  1D03  	BTFSS STATUS,Z
+0185  29A7  	GOTO	label20
+01A7        label20
+
+			// remove the note by shufflng all later notes down
+			--note_count;
+0186  08B2  	MOVF gbl_note_count, F
+0187  1D03  	BTFSS STATUS,Z
+0188  298A  	GOTO	label17
+0189  03B3  	DECF gbl_note_count+D'1', F
+018A        label17
+018A  03B2  	DECF gbl_note_count, F
+
+			for(; i<note_count; ++i) {
+018B        label18
+018B  0832  	MOVF gbl_note_count, W
+018C  0244  	SUBWF remove_not_00013_1_i, W
+018D  0833  	MOVF gbl_note_count+D'1', W
+018E  1803  	BTFSC STATUS,C
+018F  1D03  	BTFSS STATUS,Z
+0190  1BB3  	BTFSC gbl_note_count+D'1',7
+0191  29A4  	GOTO	label19
+01A2  0AC4  	INCF remove_not_00013_1_i, F
+01A3  298B  	GOTO	label18
+01A4        label19
+
+				note_held[i] = note_held[i+1];
+0192  3000  	MOVLW	HIGH(gbl_note_held)
+
+0193  0085  	MOVWF FSR0H
+0194  3078  	MOVLW LOW(gbl_note_held+D'0')
+0195  0084  	MOVWF FSR0L
+0196  0A44  	INCF remove_not_00013_1_i, W
+0197  00C5  	MOVWF CompTempVar673
+0198  0845  	MOVF CompTempVar673, W
+0199  0784  	ADDWF FSR0L, F
+019A  0800  	MOVF INDF0, W
+019B  00C6  	MOVWF CompTempVar674
+019C  3078  	MOVLW LOW(gbl_note_held+D'0')
+019D  0084  	MOVWF FSR0L
+019E  0844  	MOVF remove_not_00013_1_i, W
+019F  0784  	ADDWF FSR0L, F
+01A0  0846  	MOVF CompTempVar674, W
+01A1  0080  	MOVWF INDF0
+
+			}
+			return 1;
+01A4  3001  	MOVLW 0x01
+01A5  00C5  	MOVWF CompTempVarRet669
+
+		}
+	}
+	return 0;
+01A9  01C5  	CLRF CompTempVarRet669
+
+}
+01A6  0008  	RETURN
+01AA  0008  	RETURN
+
+
+int get_freq(byte note) {
+
+
+	const int f[] = {	
+		4186,	//c
+01FE  3010  	MOVLW 0x10
+01FF  00C9  	MOVWF get_freq_00000_1_f+D'1'
+0200  3011  	MOVLW 0x11
+0201  00CB  	MOVWF get_freq_00000_1_f+D'3'
+
+		4435,	
+0202  3012  	MOVLW 0x12
+0203  00CD  	MOVWF get_freq_00000_1_f+D'5'
+0204  3013  	MOVLW 0x13
+0205  00CF  	MOVWF get_freq_00000_1_f+D'7'
+
+		4699,	//d
+0206  3014  	MOVLW 0x14
+0207  00D1  	MOVWF get_freq_00000_1_f+D'9'
+0208  3015  	MOVLW 0x15
+0209  00D3  	MOVWF get_freq_00000_1_f+D'11'
+
+		4978,	
+020A  3017  	MOVLW 0x17
+020B  00D5  	MOVWF get_freq_00000_1_f+D'13'
+020C  3018  	MOVLW 0x18
+020D  00D7  	MOVWF get_freq_00000_1_f+D'15'
+
+		5274,	//e
+020E  3019  	MOVLW 0x19
+020F  00D9  	MOVWF get_freq_00000_1_f+D'17'
+0210  301B  	MOVLW 0x1B
+0211  00DB  	MOVWF get_freq_00000_1_f+D'19'
+
+		5588,	//f
+0212  301D  	MOVLW 0x1D
+0213  00DD  	MOVWF get_freq_00000_1_f+D'21'
+0214  301E  	MOVLW 0x1E
+0215  00DF  	MOVWF get_freq_00000_1_f+D'23'
+
+		5920,
+0216  3020  	MOVLW 0x20
+0217  00D4  	MOVWF get_freq_00000_1_f+D'12'
+0218  3023  	MOVLW 0x23
+0219  00DC  	MOVWF get_freq_00000_1_f+D'20'
+
+		6272,	//g
+021A  3053  	MOVLW 0x53
+021B  00CA  	MOVWF get_freq_00000_1_f+D'2'
+021C  305A  	MOVLW 0x5A
+021D  00C8  	MOVWF get_freq_00000_1_f
+
+		6645,	
+021E  305B  	MOVLW 0x5B
+021F  00CC  	MOVWF get_freq_00000_1_f+D'4'
+0220  3072  	MOVLW 0x72
+0221  00CE  	MOVWF get_freq_00000_1_f+D'6'
+
+		7040,	//a
+0222  3080  	MOVLW 0x80
+0223  00D6  	MOVWF get_freq_00000_1_f+D'14'
+0224  00DA  	MOVWF get_freq_00000_1_f+D'18'
+0225  309A  	MOVLW 0x9A
+
+		7459,	
+0226  00D0  	MOVWF get_freq_00000_1_f+D'8'
+0227  30D4  	MOVLW 0xD4
+0228  00D2  	MOVWF get_freq_00000_1_f+D'10'
+0229  30DE  	MOVLW 0xDE
+
+		7902	//b
+022A  00DE  	MOVWF get_freq_00000_1_f+D'22'
+022B  30F5  	MOVLW 0xF5
+022C  00D8  	MOVWF get_freq_00000_1_f+D'16'
+
+	};
+	while(note > 119) {
+022D        label25
+022D  0847  	MOVF get_freq_00000_arg_note, W
+022E  3C77  	SUBLW 0x77
+022F  1803  	BTFSC STATUS,C
+0230  2A34  	GOTO	label26
+0233  2A2D  	GOTO	label25
+0234        label26
+
+		note -=12;
+0231  300C  	MOVLW 0x0C
+0232  02C7  	SUBWF get_freq_00000_arg_note, F
+
+	}
+	return  f[note%12]>>(9-(note/12));	
+0234  3000  	MOVLW	HIGH(get_freq_00000_1_f)
+
+0235  0085  	MOVWF FSR0H
+0236  30C8  	MOVLW LOW(get_freq_00000_1_f+D'0')
+0237  0084  	MOVWF FSR0L
+0238  0847  	MOVF get_freq_00000_arg_note, W
+0239  00E0  	MOVWF __rem_8_8_00000_arg_a
+023A  300C  	MOVLW 0x0C
+023B  00E1  	MOVWF __rem_8_8_00000_arg_b
+023C  214C  	CALL __rem_8_8_00000
+023D  0867  	MOVF CompTempVarRet156, W
+023E  00E2  	MOVWF CompTempVar678
+023F  1003  	BCF STATUS,C
+0240  0D62  	RLF CompTempVar678, W
+0241  0784  	ADDWF FSR0L, F
+0242  0847  	MOVF get_freq_00000_arg_note, W
+0243  00E5  	MOVWF __div_8_8_00000_arg_a
+0244  300C  	MOVLW 0x0C
+0245  00E6  	MOVWF __div_8_8_00000_arg_b
+0246  2160  	CALL __div_8_8_00000
+0247  086A  	MOVF CompTempVarRet153, W
+0248  00E4  	MOVWF CompTempVar683
+0249  0864  	MOVF CompTempVar683, W
+024A  3C09  	SUBLW 0x09
+024B  00E3  	MOVWF CompTempVar680
+024C  0800  	MOVF INDF0, W
+024D  00E4  	MOVWF CompTempVarRet675
+024E  0A84  	INCF FSR0L, F
+024F  0800  	MOVF INDF0, W
+0250  00E5  	MOVWF CompTempVarRet675+D'1'
+0251  08E3  	MOVF CompTempVar680, F
+0252        label27
+0252  1903  	BTFSC STATUS,Z
+0254  0D00  	RLF INDF0, W
+0255  0CE5  	RRF CompTempVarRet675+D'1', F
+0256  0CE4  	RRF CompTempVarRet675, F
+0257  03E3  	DECF CompTempVar680, F
+0258  2A52  	GOTO	label27
+
+}
+0253  0008  	RETURN
+
+
+///////////////////////////////////////////////////////////////
+// PRIORITIZE A NOTE
+static void note_msg(byte note, byte vel)
+
+{
+	
+	byte i = 0;
+035F  01C1  	CLRF note_msg_00000_1_i
+
+	byte new_note = NO_NOTE;
+0360  30FF  	MOVLW 0xFF
+0361  00C2  	MOVWF note_msg_00000_1_new_note
+
+
+	// maintain stack of notes that are held
+	if(vel) {
+0362  08C0  	MOVF note_msg_00000_arg_vel, F
+0363  1903  	BTFSC STATUS,Z
+0364  2B69  	GOTO	label44
+0369        label44
+
+		add_note(note);
+0365  083F  	MOVF note_msg_00000_arg_note, W
+0366  00C3  	MOVWF add_note_00000_arg_note
+0367  2259  	CALL add_note_00000
+
+	}
+	else {
+0368  2B6C  	GOTO	label45
+036C        label45
+
+		remove_note(note);
+0369  083F  	MOVF note_msg_00000_arg_note, W
+036A  00C3  	MOVWF remove_not_00013_arg_note
+036B  2174  	CALL remove_not_00013
+
+	}
+	
+	for(i=0; i<note_count; ++i) {				
+036C  01C1  	CLRF note_msg_00000_1_i
+036D        label46
+036D  0832  	MOVF gbl_note_count, W
+036E  0241  	SUBWF note_msg_00000_1_i, W
+036F  0833  	MOVF gbl_note_count+D'1', W
+0370  1803  	BTFSC STATUS,C
+0371  1D03  	BTFSS STATUS,Z
+0372  1BB3  	BTFSC gbl_note_count+D'1',7
+0373  2B8B  	GOTO	label49
+0389  0AC1  	INCF note_msg_00000_1_i, F
+038A  2B6D  	GOTO	label46
+038B        label49
+
+		if(new_note == NO_NOTE || new_note < note_held[i]) {
+0374  0A42  	INCF note_msg_00000_1_new_note, W
+0375  1903  	BTFSC STATUS,Z
+0376  2B81  	GOTO	label47
+0377  3000  	MOVLW	HIGH(gbl_note_held)
+
+0378  0085  	MOVWF FSR0H
+0379  3078  	MOVLW LOW(gbl_note_held+D'0')
+037A  0084  	MOVWF FSR0L
+037B  0841  	MOVF note_msg_00000_1_i, W
+037C  0784  	ADDWF FSR0L, F
+037D  0800  	MOVF INDF0, W
+037E  0242  	SUBWF note_msg_00000_1_new_note, W
+037F  1803  	BTFSC STATUS,C
+0380  2B89  	GOTO	label48
+0381        label47
+0389        label48
+
+			new_note = note_held[i];
+0381  3000  	MOVLW	HIGH(gbl_note_held)
+
+0382  0085  	MOVWF FSR0H
+0383  3078  	MOVLW LOW(gbl_note_held+D'0')
+0384  0084  	MOVWF FSR0L
+0385  0841  	MOVF note_msg_00000_1_i, W
+0386  0784  	ADDWF FSR0L, F
+0387  0800  	MOVF INDF0, W
+0388  00C2  	MOVWF note_msg_00000_1_new_note
+
+		}
+	}
+	
+	if(new_note != NO_NOTE) {
+038B  0A42  	INCF note_msg_00000_1_new_note, W
+038C  1903  	BTFSC STATUS,Z
+038D  2B9B  	GOTO	label50
+039B        label50
+
+		osc_play(&osc1, get_freq(new_note));
+038E  3000  	MOVLW HIGH(gbl_osc1+D'0')
+038F  00C4  	MOVWF osc_play_00000_arg_posc+D'1'
+0390  30A0  	MOVLW LOW(gbl_osc1+D'0')
+0391  00C3  	MOVWF osc_play_00000_arg_posc
+0392  0842  	MOVF note_msg_00000_1_new_note, W
+0393  00C7  	MOVWF get_freq_00000_arg_note
+0394  21FE  	CALL get_freq_00000
+0395  0864  	MOVF CompTempVarRet675, W
+0396  00C5  	MOVWF osc_play_00000_arg_freq
+0397  0865  	MOVF CompTempVarRet675+D'1', W
+0398  00C6  	MOVWF osc_play_00000_arg_freq+D'1'
+0399  21D4  	CALL osc_play_00000
+
+	}
+	else {
+		osc_stop(&osc1);
+039B  3000  	MOVLW HIGH(gbl_osc1+D'0')
+039C  00C4  	MOVWF osc_stop_00000_arg_posc+D'1'
+039D  30A0  	MOVLW LOW(gbl_osc1+D'0')
+039E  00C3  	MOVWF osc_stop_00000_arg_posc
+039F  21AB  	CALL osc_stop_00000
+
+	}	
+}
+039A  0008  	RETURN
+03A0  0008  	RETURN
+
+
+
+////////////////////////////////////////////////////////////
+// MAIN
+void main()
+
+{ 
+	
+	// osc control / 16MHz / internal
+	osccon = 0b01111010;
+052F  307A  	MOVLW 0x7A
+0530  0021  	MOVLB 0x01
+0531  0099  	MOVWF gbl_osccon
+
+	
+	// configure io
+	trisa = TRIS_A;              	
+0532  30DF  	MOVLW 0xDF
+0533  008C  	MOVWF gbl_trisa
+
+    trisc = TRIS_C;              
+0534  30F5  	MOVLW 0xF5
+0535  008E  	MOVWF gbl_trisc
+
+	ansela = 0b00010100;		
+0536  3014  	MOVLW 0x14
+0537  0023  	MOVLB 0x03
+0538  008C  	MOVWF gbl_ansela
+
+	anselc = 0b00000101;		
+0539  3005  	MOVLW 0x05
+053A  008E  	MOVWF gbl_anselc
+
+	porta=0;
+053B  0020  	MOVLB 0x00
+053C  018C  	CLRF gbl_porta
+
+	portc=0;
+053D  018E  	CLRF gbl_portc
+
+
+	uart_init();
+053E  230F  	CALL uart_init_00000
+
+
+	// initialise MIDI comms
+	//initUSART();
+
+	// Configure timer 1 (controls tempo)
+	// Input 4MHz
+	// Prescaled to 500KHz
+	//tmr1l = 0;	 // reset timer count register
+	//tmr1h = 0;
+	//t1con.7 = 0; // } Fosc/4 rate
+	//t1con.6 = 0; // }
+	//t1con.5 = 1; // } 1:8 prescale
+	//t1con.4 = 1; // }
+	//t1con.0 = 1; // timer 1 on
+	//pie1.0 = 1;  // timer 1 interrupt enable
+	
+	// Configure timer 0 (controls systemticks)
+	// 	timer 0 runs at 4MHz
+	// 	prescaled 1/16 = 250kHz
+	// 	rollover at 250 = 1kHz
+	// 	1ms per rollover	
+	//option_reg.5 = 0; // timer 0 driven from instruction cycle clock
+	//option_reg.3 = 0; // timer 0 is prescaled
+	//option_reg.2 = 0; // }
+	//option_reg.1 = 1; // } 1/16 prescaler
+	//option_reg.0 = 1; // }
+	//intcon.5 = 1; 	  // enabled timer 0 interrrupt
+	//intcon.2 = 0;     // clear interrupt fired flag
+	
+	// enable interrupts	
+	intcon.7 = 1; //GIE
+053F  178B  	BSF gbl_intcon,7
+
+	intcon.6 = 1; //PEIE
+0540  170B  	BSF gbl_intcon,6
+
+
+
+	
+/*
+	clock at 4MHz.. 1/4 prescale, 1MHz resolution
+	
+	440Hz
+	full cycle = 0.0022727272727273 sec
+	= 1136 counts per wave cycle
+	= 568 counts per flip at 50% duty
+*/
+	osc_init(&osc1);
+0541  3000  	MOVLW HIGH(gbl_osc1+D'0')
+0542  0021  	MOVLB 0x01
+0543  00BE  	MOVWF osc_init_00000_arg_posc+D'1'
+0544  30A0  	MOVLW LOW(gbl_osc1+D'0')
+0545  00BD  	MOVWF osc_init_00000_arg_posc
+0546  2328  	CALL osc_init_00000
+
+	
+//	set_osc1(356,128);
+	ccp1con = 0b00001010; // software interrupt only
+0547  300A  	MOVLW 0x0A
+0548  0025  	MOVLB 0x05
+0549  0093  	MOVWF gbl_ccp1con
+
+	
+	ccpr1h = 0;
+054A  0192  	CLRF gbl_ccpr1h
+
+	ccpr1l = 0;
+054B  0191  	CLRF gbl_ccpr1l
+
+	pie1.2 = 1; // CCP1IE
+054C  0021  	MOVLB 0x01
+054D  1511  	BSF gbl_pie1,2
+
+	
+
+	// Configure timer 1
+	tmr1h = 0;
+054E  0020  	MOVLB 0x00
+054F  0197  	CLRF gbl_tmr1h
+
+	tmr1l = 0;
+0550  0196  	CLRF gbl_tmr1l
+
+	t1con = 0b00100001; // Internal clock, Fosc/4
+0551  3021  	MOVLW 0x21
+0552  0098  	MOVWF gbl_t1con
+
+			
+	// Configure the ADC
+    adcon1=0b11010000; // right justify, Fosc/16, Vdd - Vss
+0553  30D0  	MOVLW 0xD0
+0554  0021  	MOVLB 0x01
+0555  009E  	MOVWF gbl_adcon1
+
+    adcon0=0b00000001; // turn on the ADC
+0556  3001  	MOVLW 0x01
+0557  009D  	MOVWF gbl_adcon0
+
+
+	enum {
+		MODE_OFF,
+		MODE_MIDI,
+		MODE_PITCH,
+		MODE_PITCHLO
+	};
+	byte new_mode = MODE_OFF;
+0558  01BB  	CLRF main_1_new_mode
+
+	byte mode = MODE_OFF;
+0559  01BC  	CLRF main_1_mode
+
+	for(;;) {
+055A        label66
+0648  2D5A  	GOTO	label66
+
+	P_LED = 0;
+055A  0022  	MOVLB 0x02
+055B  128C  	BCF gbl_lata,5
+
+		adc_run();
+055C  243A  	CALL adc_run_00000
+
+		
+		if(adc_chan[KNOB_MODE].status) {
+055D  0020  	MOVLB 0x00
+055E  08E7  	MOVF gbl_adc_chan+D'7', F
+055F  1903  	BTFSC STATUS,Z
+0560  2DCA  	GOTO	label78
+
+			adc_chan[KNOB_MODE].status = 0;
+0561  01E7  	CLRF gbl_adc_chan+D'7'
+
+			if(adc_chan[KNOB_MODE].result < 100) {
+0562  3064  	MOVLW 0x64
+0563  026A  	SUBWF gbl_adc_chan+D'10', W
+0564  086B  	MOVF gbl_adc_chan+D'11', W
+0565  1803  	BTFSC STATUS,C
+0566  2D6C  	GOTO	label67
+0567  1D03  	BTFSS STATUS,Z
+0568  2D6C  	GOTO	label67
+056C        label67
+
+				new_mode = MODE_OFF;
+0569  0021  	MOVLB 0x01
+056A  01BB  	CLRF main_1_new_mode
+
+			}
+			else if(adc_chan[KNOB_MODE].result < 300) {
+056B  2D87  	GOTO	label72
+056C  3001  	MOVLW 0x01
+056D  026B  	SUBWF gbl_adc_chan+D'11', W
+056E  1D03  	BTFSS STATUS,Z
+056F  2D72  	GOTO	label68
+0570  302C  	MOVLW 0x2C
+0571  026A  	SUBWF gbl_adc_chan+D'10', W
+0572        label68
+0572  1803  	BTFSC STATUS,C
+0573  2D78  	GOTO	label69
+0578        label69
+
+				new_mode = MODE_MIDI;
+0574  3001  	MOVLW 0x01
+0575  0021  	MOVLB 0x01
+0576  00BB  	MOVWF main_1_new_mode
+
+			}
+			else if(adc_chan[KNOB_MODE].result < 500) {			
+0577  2D87  	GOTO	label72
+0578  3001  	MOVLW 0x01
+0579  026B  	SUBWF gbl_adc_chan+D'11', W
+057A  1D03  	BTFSS STATUS,Z
+057B  2D7E  	GOTO	label70
+057C  30F4  	MOVLW 0xF4
+057D  026A  	SUBWF gbl_adc_chan+D'10', W
+057E        label70
+057E  1803  	BTFSC STATUS,C
+057F  2D84  	GOTO	label71
+0584        label71
+
+				new_mode = MODE_PITCH;
+0580  3002  	MOVLW 0x02
+0581  0021  	MOVLB 0x01
+0582  00BB  	MOVWF main_1_new_mode
+
+			}
+			else {//if(adc_chan[KNOB_MODE].result < 700) {
+0583  2D87  	GOTO	label72
+0587        label72
+
+				new_mode = MODE_PITCHLO;
+0584  3003  	MOVLW 0x03
+0585  0021  	MOVLB 0x01
+0586  00BB  	MOVWF main_1_new_mode
+
+			}/*
+			else if(adc_chan[KNOB_MODE].result < 900) {
+			}
+			else {
+			}*/
+
+			if(new_mode != mode) {
+0587  083C  	MOVF main_1_mode, W
+0588  063B  	XORWF main_1_new_mode, W
+0589  1903  	BTFSC STATUS,Z
+058A  2DCA  	GOTO	label78
+05CA        label78
+
+				switch(new_mode) {
+0598  2DC8  	GOTO	label77
+05C8        label77
+
+					case MODE_OFF:
+058B  083B  	MOVF main_1_new_mode, W
+058C  3A00  	XORLW 0x00
+058D  1903  	BTFSC STATUS,Z
+058E  2D99  	GOTO	label73
+0599        label73
+
+						osc_stop(&osc1);
+0599  3000  	MOVLW HIGH(gbl_osc1+D'0')
+059A  00C4  	MOVWF osc_stop_00000_arg_posc+D'1'
+059B  30A0  	MOVLW LOW(gbl_osc1+D'0')
+059C  00C3  	MOVWF osc_stop_00000_arg_posc
+059D  21AB  	CALL osc_stop_00000
+
+						break;
+059E  2DC8  	GOTO	label77
+
+					case MODE_MIDI:					
+058F  3A01  	XORLW 0x01
+0590  1903  	BTFSC STATUS,Z
+0591  2D9F  	GOTO	label74
+059F        label74
+
+						osc_stop(&osc1);
+059F  3000  	MOVLW HIGH(gbl_osc1+D'0')
+05A0  00C4  	MOVWF osc_stop_00000_arg_posc+D'1'
+05A1  30A0  	MOVLW LOW(gbl_osc1+D'0')
+05A2  00C3  	MOVWF osc_stop_00000_arg_posc
+05A3  21AB  	CALL osc_stop_00000
+
+						rx_head = 0;
+05A4  01B4  	CLRF gbl_rx_head
+
+						rx_tail = 0;
+05A5  01B5  	CLRF gbl_rx_tail
+
+						break;
+05A6  2DC8  	GOTO	label77
+
+					case MODE_PITCH:
+0592  3A03  	XORLW 0x03
+0593  1903  	BTFSC STATUS,Z
+0594  2DA7  	GOTO	label75
+05A7        label75
+
+						osc_play(&osc1, adc_chan[KNOB_MODE].result);
+05A7  3000  	MOVLW HIGH(gbl_osc1+D'0')
+05A8  00C4  	MOVWF osc_play_00000_arg_posc+D'1'
+05A9  30A0  	MOVLW LOW(gbl_osc1+D'0')
+05AA  00C3  	MOVWF osc_play_00000_arg_posc
+05AB  0020  	MOVLB 0x00
+05AC  086A  	MOVF gbl_adc_chan+D'10', W
+05AD  0021  	MOVLB 0x01
+05AE  00C5  	MOVWF osc_play_00000_arg_freq
+05AF  0020  	MOVLB 0x00
+05B0  086B  	MOVF gbl_adc_chan+D'11', W
+05B1  0021  	MOVLB 0x01
+05B2  00C6  	MOVWF osc_play_00000_arg_freq+D'1'
+05B3  21D4  	CALL osc_play_00000
+
+						break;
+05B4  2DC8  	GOTO	label77
+
+					case MODE_PITCHLO:
+0595  3A01  	XORLW 0x01
+0596  1903  	BTFSC STATUS,Z
+0597  2DB5  	GOTO	label76
+05B5        label76
+
+						osc_play(&osc1, adc_chan[KNOB_MODE].result/16);
+05B5  3000  	MOVLW HIGH(gbl_osc1+D'0')
+05B6  00C4  	MOVWF osc_play_00000_arg_posc+D'1'
+05B7  30A0  	MOVLW LOW(gbl_osc1+D'0')
+05B8  00C3  	MOVWF osc_play_00000_arg_posc
+05B9  0020  	MOVLB 0x00
+05BA  0E6A  	SWAPF gbl_adc_chan+D'10', W
+05BB  0021  	MOVLB 0x01
+05BC  00C5  	MOVWF osc_play_00000_arg_freq
+05BD  300F  	MOVLW 0x0F
+05BE  05C5  	ANDWF osc_play_00000_arg_freq, F
+05BF  0020  	MOVLB 0x00
+05C0  0E6B  	SWAPF gbl_adc_chan+D'11', W
+05C1  0021  	MOVLB 0x01
+05C2  00C6  	MOVWF osc_play_00000_arg_freq+D'1'
+05C3  39F0  	ANDLW 0xF0
+05C4  04C5  	IORWF osc_play_00000_arg_freq, F
+05C5  300F  	MOVLW 0x0F
+05C6  05C6  	ANDWF osc_play_00000_arg_freq+D'1', F
+05C7  21D4  	CALL osc_play_00000
+
+						break;
+				}
+				mode = new_mode;
+05C8  083B  	MOVF main_1_new_mode, W
+05C9  00BC  	MOVWF main_1_mode
+
+			}
+		}
+		
+		switch(mode) {
+05D5  2E10  	GOTO	label84
+
+		case MODE_MIDI:	
+05CA  0021  	MOVLB 0x01
+05CB  083C  	MOVF main_1_mode, W
+05CC  3A01  	XORLW 0x01
+05CD  1903  	BTFSC STATUS,Z
+05CE  2DD6  	GOTO	label79
+05D6        label79
+
+			{
+				byte msg = midi_in();		
+05D6  23A1  	CALL midi_in_00000
+05D7  0843  	MOVF CompTempVarRet637, W
+05D8  00BD  	MOVWF main_58_msg
+
+				switch(msg & 0xF0) {
+05D9  30F0  	MOVLW 0xF0
+05DA  053D  	ANDWF main_58_msg, W
+05DB  00BE  	MOVWF CompTempVar710
+
+				// MIDI NOTE OFF
+				case 0x80:
+05DC  083E  	MOVF CompTempVar710, W
+05DD  3A80  	XORLW 0x80
+05DE  1903  	BTFSC STATUS,Z
+05DF  2DE4  	GOTO	label80
+05E4        label80
+
+				case 0x90:
+05E0  3A10  	XORLW 0x10
+05E1  1903  	BTFSC STATUS,Z
+05E2  2DE4  	GOTO	label80
+
+					note_msg(midi_params[0], midi_params[1]);
+05E4  0830  	MOVF gbl_midi_params, W
+05E5  00BF  	MOVWF note_msg_00000_arg_note
+05E6  0831  	MOVF gbl_midi_params+D'1', W
+05E7  00C0  	MOVWF note_msg_00000_arg_vel
+05E8  235F  	CALL note_msg_00000
+
+					P_LED = 1;
+05E9  0022  	MOVLB 0x02
+05EA  168C  	BSF gbl_lata,5
+
+					break;
+05EB  2E10  	GOTO	label84
+
+				default:
+05E3  2DEC  	GOTO	label81
+05EC        label81
+
+					P_LED = 0;
+05EC  0022  	MOVLB 0x02
+05ED  128C  	BCF gbl_lata,5
+
+					break;
+				}		
+			}
+			break;
+05EE  2E10  	GOTO	label84
+
+		case MODE_PITCH:	
+05CF  3A03  	XORLW 0x03
+05D0  1903  	BTFSC STATUS,Z
+05D1  2DEF  	GOTO	label82
+05EF        label82
+
+			if(adc_chan[KNOB_FREQ].status) {
+05EF  08F3  	MOVF gbl_adc_chan+D'19', F
+05F0  1903  	BTFSC STATUS,Z
+05F1  2E10  	GOTO	label84
+
+				adc_chan[KNOB_FREQ].status = 0;
+05F2  01F3  	CLRF gbl_adc_chan+D'19'
+
+				osc_play(&osc1, adc_chan[KNOB_FREQ].result);
+05F3  3000  	MOVLW HIGH(gbl_osc1+D'0')
+05F4  00C4  	MOVWF osc_play_00000_arg_posc+D'1'
+05F5  30A0  	MOVLW LOW(gbl_osc1+D'0')
+05F6  00C3  	MOVWF osc_play_00000_arg_posc
+05F7  0876  	MOVF gbl_adc_chan+D'22', W
+05F8  00C5  	MOVWF osc_play_00000_arg_freq
+05F9  0877  	MOVF gbl_adc_chan+D'23', W
+05FA  00C6  	MOVWF osc_play_00000_arg_freq+D'1'
+05FB  21D4  	CALL osc_play_00000
+
+			}
+			break;
+05FC  2E10  	GOTO	label84
+
+		case MODE_PITCHLO:	
+05D2  3A01  	XORLW 0x01
+05D3  1903  	BTFSC STATUS,Z
+05D4  2DFD  	GOTO	label83
+05FD        label83
+
+			if(adc_chan[KNOB_FREQ].status) {
+05FD  08F3  	MOVF gbl_adc_chan+D'19', F
+05FE  1903  	BTFSC STATUS,Z
+05FF  2E10  	GOTO	label84
+0610        label84
+
+				adc_chan[KNOB_FREQ].status = 0;
+0600  01F3  	CLRF gbl_adc_chan+D'19'
+
+				osc_play(&osc1, adc_chan[KNOB_FREQ].result/16);
+0601  3000  	MOVLW HIGH(gbl_osc1+D'0')
+0602  00C4  	MOVWF osc_play_00000_arg_posc+D'1'
+0603  30A0  	MOVLW LOW(gbl_osc1+D'0')
+0604  00C3  	MOVWF osc_play_00000_arg_posc
+0605  0E76  	SWAPF gbl_adc_chan+D'22', W
+0606  00C5  	MOVWF osc_play_00000_arg_freq
+0607  300F  	MOVLW 0x0F
+0608  05C5  	ANDWF osc_play_00000_arg_freq, F
+0609  0E77  	SWAPF gbl_adc_chan+D'23', W
+060A  00C6  	MOVWF osc_play_00000_arg_freq+D'1'
+060B  39F0  	ANDLW 0xF0
+060C  04C5  	IORWF osc_play_00000_arg_freq, F
+060D  300F  	MOVLW 0x0F
+060E  05C6  	ANDWF osc_play_00000_arg_freq+D'1', F
+060F  21D4  	CALL osc_play_00000
+
+			}
+			break;
+		}
+		
+		if(adc_chan[KNOB_DUTY1].status) {
+0610  0020  	MOVLB 0x00
+0611  08E1  	MOVF gbl_adc_chan+D'1', F
+0612  1903  	BTFSC STATUS,Z
+0613  2D5A  	GOTO	label66
+
+			adc_chan[KNOB_DUTY1].status = 0;
+0614  01E1  	CLRF gbl_adc_chan+D'1'
+
+			if(adc_chan[KNOB_DUTY1].result < 2) {
+0615  3002  	MOVLW 0x02
+0616  0264  	SUBWF gbl_adc_chan+D'4', W
+0617  0865  	MOVF gbl_adc_chan+D'5', W
+0618  1803  	BTFSC STATUS,C
+0619  2E23  	GOTO	label85
+061A  1D03  	BTFSS STATUS,Z
+061B  2E23  	GOTO	label85
+0623        label85
+
+				osc_stop(&osc1);
+061C  3000  	MOVLW HIGH(gbl_osc1+D'0')
+061D  0021  	MOVLB 0x01
+061E  00C4  	MOVWF osc_stop_00000_arg_posc+D'1'
+061F  30A0  	MOVLW LOW(gbl_osc1+D'0')
+0620  00C3  	MOVWF osc_stop_00000_arg_posc
+0621  21AB  	CALL osc_stop_00000
+
+			}
+			else if(adc_chan[KNOB_DUTY1].result > 1020) {
+0622  2D5A  	GOTO	label66
+0623  0865  	MOVF gbl_adc_chan+D'5', W
+0624  3C03  	SUBLW 0x03
+0625  1D03  	BTFSS STATUS,Z
+0626  2E29  	GOTO	label86
+0627  0864  	MOVF gbl_adc_chan+D'4', W
+0628  3CFC  	SUBLW 0xFC
+0629        label86
+0629  1803  	BTFSC STATUS,C
+062A  2E35  	GOTO	label87
+0635        label87
+
+				osc_duty(&osc1, 255);
+062B  3000  	MOVLW HIGH(gbl_osc1+D'0')
+062C  0021  	MOVLB 0x01
+062D  00BE  	MOVWF osc_duty_00000_arg_posc+D'1'
+062E  30A0  	MOVLW LOW(gbl_osc1+D'0')
+062F  00BD  	MOVWF osc_duty_00000_arg_posc
+0630  30FF  	MOVLW 0xFF
+0631  00BF  	MOVWF osc_duty_00000_arg_duty
+0632  01C0  	CLRF osc_duty_00000_arg_duty+D'1'
+0633  234B  	CALL osc_duty_00000
+
+			}
+			else {
+0634  2D5A  	GOTO	label66
+
+				osc_duty(&osc1, adc_chan[KNOB_DUTY1].result>>2);
+0635  3000  	MOVLW HIGH(gbl_osc1+D'0')
+0636  0021  	MOVLB 0x01
+0637  00BE  	MOVWF osc_duty_00000_arg_posc+D'1'
+0638  30A0  	MOVLW LOW(gbl_osc1+D'0')
+0639  00BD  	MOVWF osc_duty_00000_arg_posc
+063A  0020  	MOVLB 0x00
+063B  0864  	MOVF gbl_adc_chan+D'4', W
+063C  0021  	MOVLB 0x01
+063D  00BF  	MOVWF osc_duty_00000_arg_duty
+063E  0020  	MOVLB 0x00
+063F  0C65  	RRF gbl_adc_chan+D'5', W
+0640  0021  	MOVLB 0x01
+0641  00C0  	MOVWF osc_duty_00000_arg_duty+D'1'
+0642  0CBF  	RRF osc_duty_00000_arg_duty, F
+0643  0CC0  	RRF osc_duty_00000_arg_duty+D'1', F
+0644  0CBF  	RRF osc_duty_00000_arg_duty, F
+0645  303F  	MOVLW 0x3F
+0646  05C0  	ANDWF osc_duty_00000_arg_duty+D'1', F
+0647  234B  	CALL osc_duty_00000
+
+			}
+		}
+	}
+}
+
+
+/* 
+	< 100
+	< 300
+	< 500
+	< 700
+	< 900
+	
+	
+*/
+
+/*
+0
+192	200	
+394	400
+599	600
+804	800
+1000
+*/
+*/
+////////////////////////////////////////
+// Code with no source :-)
+////////////////////////////////////////
+0000  2E49  	GOTO	_startup
+
+0004  3180  	MOVLP 0x00
+0005  2E60  	GOTO	interrupt
+0007        __mul_32s__00011
+0007        ; { __mul_32s_32s ; function begin
+0007  01E6  	CLRF __mul_32s__00011_1_i
+0008  01E7  	CLRF CompTempVarRet395
+0009  01E8  	CLRF CompTempVarRet395+D'1'
+000A  01E9  	CLRF CompTempVarRet395+D'2'
+000B  01EA  	CLRF CompTempVarRet395+D'3'
+000C  1FDF  	BTFSS __mul_32s__00011_arg_b+D'1',7
+000D  281A  	GOTO	label1
+000E  17E6  	BSF __mul_32s__00011_1_i,7
+000F  09DE  	COMF __mul_32s__00011_arg_b, F
+0010  09DF  	COMF __mul_32s__00011_arg_b+D'1', F
+0011  09E0  	COMF __mul_32s__00011_arg_b+D'2', F
+0012  09E1  	COMF __mul_32s__00011_arg_b+D'3', F
+0013  0ADE  	INCF __mul_32s__00011_arg_b, F
+0014  1903  	BTFSC gbl_status,2
+0015  0ADF  	INCF __mul_32s__00011_arg_b+D'1', F
+0016  1903  	BTFSC gbl_status,2
+0017  0AE0  	INCF __mul_32s__00011_arg_b+D'2', F
+0018  1903  	BTFSC gbl_status,2
+0019  0AE1  	INCF __mul_32s__00011_arg_b+D'3', F
+001A        label1
+001A  1AE6  	BTFSC __mul_32s__00011_1_i,5
+001B  2838  	GOTO	label3
+001C  1C5E  	BTFSS __mul_32s__00011_arg_b,0
+001D  282C  	GOTO	label2
+001E  085A  	MOVF __mul_32s__00011_arg_a, W
+001F  07E7  	ADDWF CompTempVarRet395, F
+0020  085B  	MOVF __mul_32s__00011_arg_a+D'1', W
+0021  1803  	BTFSC gbl_status,0
+0022  0F5B  	INCFSZ __mul_32s__00011_arg_a+D'1', W
+0023  07E8  	ADDWF CompTempVarRet395+D'1', F
+0024  085C  	MOVF __mul_32s__00011_arg_a+D'2', W
+0025  1803  	BTFSC gbl_status,0
+0026  0F5C  	INCFSZ __mul_32s__00011_arg_a+D'2', W
+0027  07E9  	ADDWF CompTempVarRet395+D'2', F
+0028  085D  	MOVF __mul_32s__00011_arg_a+D'3', W
+0029  1803  	BTFSC gbl_status,0
+002A  0F5D  	INCFSZ __mul_32s__00011_arg_a+D'3', W
+002B  07EA  	ADDWF CompTempVarRet395+D'3', F
+002C        label2
+002C  1003  	BCF gbl_status,0
+002D  0CE1  	RRF __mul_32s__00011_arg_b+D'3', F
+002E  0CE0  	RRF __mul_32s__00011_arg_b+D'2', F
+002F  0CDF  	RRF __mul_32s__00011_arg_b+D'1', F
+0030  0CDE  	RRF __mul_32s__00011_arg_b, F
+0031  1003  	BCF gbl_status,0
+0032  0DDA  	RLF __mul_32s__00011_arg_a, F
+0033  0DDB  	RLF __mul_32s__00011_arg_a+D'1', F
+0034  0DDC  	RLF __mul_32s__00011_arg_a+D'2', F
+0035  0DDD  	RLF __mul_32s__00011_arg_a+D'3', F
+0036  0AE6  	INCF __mul_32s__00011_1_i, F
+0037  281A  	GOTO	label1
+0038        label3
+0038  1FE6  	BTFSS __mul_32s__00011_1_i,7
+0039  0008  	RETURN
+003A  09E7  	COMF CompTempVarRet395, F
+003B  09E8  	COMF CompTempVarRet395+D'1', F
+003C  09E9  	COMF CompTempVarRet395+D'2', F
+003D  09EA  	COMF CompTempVarRet395+D'3', F
+003E  0AE7  	INCF CompTempVarRet395, F
+003F  1903  	BTFSC gbl_status,2
+0040  0AE8  	INCF CompTempVarRet395+D'1', F
+0041  1903  	BTFSC gbl_status,2
+0042  0AE9  	INCF CompTempVarRet395+D'2', F
+0043  1903  	BTFSC gbl_status,2
+0044  0AEA  	INCF CompTempVarRet395+D'3', F
+0045  0008  	RETURN
+0046        ; } __mul_32s_32s function end
+
+0046        __div_32_3_00002
+0046        ; { __div_32_32 ; function begin
+0046  01D6  	CLRF __div_32_3_00002_1_r
+0047  01D7  	CLRF __div_32_3_00002_1_r+D'1'
+0048  01D8  	CLRF __div_32_3_00002_1_r+D'2'
+0049  01D9  	CLRF __div_32_3_00002_1_r+D'3'
+004A  01DC  	CLRF CompTempVarRet141
+004B  01DD  	CLRF CompTempVarRet141+D'1'
+004C  01DE  	CLRF CompTempVarRet141+D'2'
+004D  01DF  	CLRF CompTempVarRet141+D'3'
+004E  01DA  	CLRF __div_32_3_00002_1_i
+004F        label4
+004F  3020  	MOVLW 0x20
+0050  055A  	ANDWF __div_32_3_00002_1_i, W
+0051  00DB  	MOVWF CompTempVar143
+0052  08DB  	MOVF CompTempVar143, F
+0053  1D03  	BTFSS STATUS,Z
+0054  0008  	RETURN
+0055  35DC  	LSLF CompTempVarRet141, F
+0056  0DDD  	RLF CompTempVarRet141+D'1', F
+0057  0DDE  	RLF CompTempVarRet141+D'2', F
+0058  0DDF  	RLF CompTempVarRet141+D'3', F
+0059  0DCD  	RLF __div_32_3_00002_arg_a, F
+005A  0DCE  	RLF __div_32_3_00002_arg_a+D'1', F
+005B  0DCF  	RLF __div_32_3_00002_arg_a+D'2', F
+005C  0DD0  	RLF __div_32_3_00002_arg_a+D'3', F
+005D  0DD6  	RLF __div_32_3_00002_1_r, F
+005E  0DD7  	RLF __div_32_3_00002_1_r+D'1', F
+005F  0DD8  	RLF __div_32_3_00002_1_r+D'2', F
+0060  0DD9  	RLF __div_32_3_00002_1_r+D'3', F
+0061  0854  	MOVF __div_32_3_00002_arg_b+D'3', W
+0062  0259  	SUBWF __div_32_3_00002_1_r+D'3', W
+0063  1D03  	BTFSS STATUS,Z
+0064  286F  	GOTO	label5
+0065  0853  	MOVF __div_32_3_00002_arg_b+D'2', W
+0066  0258  	SUBWF __div_32_3_00002_1_r+D'2', W
+0067  1D03  	BTFSS STATUS,Z
+0068  286F  	GOTO	label5
+0069  0852  	MOVF __div_32_3_00002_arg_b+D'1', W
+006A  0257  	SUBWF __div_32_3_00002_1_r+D'1', W
+006B  1D03  	BTFSS STATUS,Z
+006C  286F  	GOTO	label5
+006D  0851  	MOVF __div_32_3_00002_arg_b, W
+006E  0256  	SUBWF __div_32_3_00002_1_r, W
+006F        label5
+006F  1C03  	BTFSS STATUS,C
+0070  2880  	GOTO	label6
+0071  0851  	MOVF __div_32_3_00002_arg_b, W
+0072  02D6  	SUBWF __div_32_3_00002_1_r, F
+0073  0852  	MOVF __div_32_3_00002_arg_b+D'1', W
+0074  1C03  	BTFSS STATUS,C
+0075  0F52  	INCFSZ __div_32_3_00002_arg_b+D'1', W
+0076  02D7  	SUBWF __div_32_3_00002_1_r+D'1', F
+0077  0853  	MOVF __div_32_3_00002_arg_b+D'2', W
+0078  1C03  	BTFSS STATUS,C
+0079  0F53  	INCFSZ __div_32_3_00002_arg_b+D'2', W
+007A  02D8  	SUBWF __div_32_3_00002_1_r+D'2', F
+007B  0854  	MOVF __div_32_3_00002_arg_b+D'3', W
+007C  1C03  	BTFSS STATUS,C
+007D  0F54  	INCFSZ __div_32_3_00002_arg_b+D'3', W
+007E  02D9  	SUBWF __div_32_3_00002_1_r+D'3', F
+007F  145C  	BSF CompTempVarRet141,0
+0080        label6
+0080  0ADA  	INCF __div_32_3_00002_1_i, F
+0081  284F  	GOTO	label4
+0082        ; } __div_32_32 function end
+
+
+014C        __rem_8_8_00000
+014C        ; { __rem_8_8 ; function begin
+014C  01E7  	CLRF CompTempVarRet156
+014D  01E4  	CLRF __rem_8_8_00000_1_c
+014E  01E5  	CLRF __rem_8_8_00000_1_i
+014F        label12
+014F  3008  	MOVLW 0x08
+0150  0565  	ANDWF __rem_8_8_00000_1_i, W
+0151  00E6  	MOVWF CompTempVar158
+0152  08E6  	MOVF CompTempVar158, F
+0153  1D03  	BTFSS STATUS,Z
+0154  0008  	RETURN
+0155  35E4  	LSLF __rem_8_8_00000_1_c, F
+0156  0DE0  	RLF __rem_8_8_00000_arg_a, F
+0157  0DE7  	RLF CompTempVarRet156, F
+0158  0861  	MOVF __rem_8_8_00000_arg_b, W
+0159  0267  	SUBWF CompTempVarRet156, W
+015A  1C03  	BTFSS STATUS,C
+015B  295E  	GOTO	label13
+015C  00E7  	MOVWF CompTempVarRet156
+015D  1464  	BSF __rem_8_8_00000_1_c,0
+015E        label13
+015E  0AE5  	INCF __rem_8_8_00000_1_i, F
+015F  294F  	GOTO	label12
+0160        ; } __rem_8_8 function end
+
+0160        __div_8_8_00000
+0160        ; { __div_8_8 ; function begin
+0160  01E7  	CLRF __div_8_8_00000_1_r
+0161  01EA  	CLRF CompTempVarRet153
+0162  01E8  	CLRF __div_8_8_00000_1_i
+0163        label14
+0163  3008  	MOVLW 0x08
+0164  0568  	ANDWF __div_8_8_00000_1_i, W
+0165  00E9  	MOVWF CompTempVar155
+0166  08E9  	MOVF CompTempVar155, F
+0167  1D03  	BTFSS STATUS,Z
+0168  0008  	RETURN
+0169  35EA  	LSLF CompTempVarRet153, F
+016A  0DE5  	RLF __div_8_8_00000_arg_a, F
+016B  0DE7  	RLF __div_8_8_00000_1_r, F
+016C  0866  	MOVF __div_8_8_00000_arg_b, W
+016D  0267  	SUBWF __div_8_8_00000_1_r, W
+016E  1C03  	BTFSS STATUS,C
+016F  2972  	GOTO	label15
+0170  00E7  	MOVWF __div_8_8_00000_1_r
+0171  146A  	BSF CompTempVarRet153,0
+0172        label15
+0172  0AE8  	INCF __div_8_8_00000_1_i, F
+0173  2963  	GOTO	label14
+0174        ; } __div_8_8 function end
+
+
+01E6        memset8_00000
+01E6        ; { memset8 ; function begin
+01E6  083F  	MOVF memset8_00000_arg_ptr, W
+01E7  00C3  	MOVWF memset8_00000_1_uPtr
+01E8  0840  	MOVF memset8_00000_arg_ptr+D'1', W
+01E9  00C4  	MOVWF memset8_00000_1_uPtr+D'1'
+01EA        label23
+01EA  0842  	MOVF memset8_00000_arg_len, W
+01EB  3C00  	SUBLW 0x00
+01EC  1803  	BTFSC STATUS,C
+01ED  29F9  	GOTO	label24
+01EE  0844  	MOVF memset8_00000_1_uPtr+D'1', W
+01EF  0085  	MOVWF FSR0H
+01F0  0843  	MOVF memset8_00000_1_uPtr, W
+01F1  0084  	MOVWF FSR0L
+01F2  0AC3  	INCF memset8_00000_1_uPtr, F
+01F3  1903  	BTFSC STATUS,Z
+01F4  0AC4  	INCF memset8_00000_1_uPtr+D'1', F
+01F5  0841  	MOVF memset8_00000_arg_ch, W
+01F6  0080  	MOVWF INDF0
+01F7  03C2  	DECF memset8_00000_arg_len, F
+01F8  29EA  	GOTO	label23
+01F9        label24
+01F9  083F  	MOVF memset8_00000_arg_ptr, W
+01FA  00C5  	MOVWF CompTempVarRet380
+01FB  0840  	MOVF memset8_00000_arg_ptr+D'1', W
+01FC  00C6  	MOVWF CompTempVarRet380+D'1'
+01FD  0008  	RETURN
+01FE        ; } memset8 function end
+
+
+02D9        __mul_8_8__00006
+02D9        ; { __mul_8_8__8 ; function begin
+02D9  01E6  	CLRF __mul_8_8__00006_1_i
+02DA  01E7  	CLRF CompTempVarRet381
+02DB        label39
+02DB  19E6  	BTFSC __mul_8_8__00006_1_i,3
+02DC  0008  	RETURN
+02DD  1C40  	BTFSS __mul_8_8__00006_arg_b,0
+02DE  2AE1  	GOTO	label40
+02DF  083F  	MOVF __mul_8_8__00006_arg_a, W
+02E0  07E7  	ADDWF CompTempVarRet381, F
+02E1        label40
+02E1  0CC0  	RRF __mul_8_8__00006_arg_b, F
+02E2  1003  	BCF gbl_status,0
+02E3  0DBF  	RLF __mul_8_8__00006_arg_a, F
+02E4  0AE6  	INCF __mul_8_8__00006_1_i, F
+02E5  2ADB  	GOTO	label39
+02E6        ; } __mul_8_8__8 function end
+
+02E6        __mul_16s__0000F
+02E6        ; { __mul_16s_16s__16 ; function begin
+02E6  01C9  	CLRF __mul_16s__0000F_1_i
+02E7  01CC  	CLRF CompTempVarRet391
+02E8  01CD  	CLRF CompTempVarRet391+D'1'
+02E9  0843  	MOVF __mul_16s__0000F_arg_a, W
+02EA  00CA  	MOVWF __mul_16s__0000F_1_t
+02EB  0844  	MOVF __mul_16s__0000F_arg_a+D'1', W
+02EC  00CB  	MOVWF __mul_16s__0000F_1_t+D'1'
+02ED  1FC6  	BTFSS __mul_16s__0000F_arg_b+D'1',7
+02EE  2AF5  	GOTO	label41
+02EF  17C9  	BSF __mul_16s__0000F_1_i,7
+02F0  09C5  	COMF __mul_16s__0000F_arg_b, F
+02F1  09C6  	COMF __mul_16s__0000F_arg_b+D'1', F
+02F2  0AC5  	INCF __mul_16s__0000F_arg_b, F
+02F3  1903  	BTFSC gbl_status,2
+02F4  0AC6  	INCF __mul_16s__0000F_arg_b+D'1', F
+02F5        label41
+02F5  1A49  	BTFSC __mul_16s__0000F_1_i,4
+02F6  2B07  	GOTO	label43
+02F7  1C45  	BTFSS __mul_16s__0000F_arg_b,0
+02F8  2AFF  	GOTO	label42
+02F9  084A  	MOVF __mul_16s__0000F_1_t, W
+02FA  07CC  	ADDWF CompTempVarRet391, F
+02FB  084B  	MOVF __mul_16s__0000F_1_t+D'1', W
+02FC  1803  	BTFSC gbl_status,0
+02FD  0F4B  	INCFSZ __mul_16s__0000F_1_t+D'1', W
+02FE  07CD  	ADDWF CompTempVarRet391+D'1', F
+02FF        label42
+02FF  1003  	BCF gbl_status,0
+0300  0CC6  	RRF __mul_16s__0000F_arg_b+D'1', F
+0301  0CC5  	RRF __mul_16s__0000F_arg_b, F
+0302  1003  	BCF gbl_status,0
+0303  0DCA  	RLF __mul_16s__0000F_1_t, F
+0304  0DCB  	RLF __mul_16s__0000F_1_t+D'1', F
+0305  0AC9  	INCF __mul_16s__0000F_1_i, F
+0306  2AF5  	GOTO	label41
+0307        label43
+0307  1FC9  	BTFSS __mul_16s__0000F_1_i,7
+0308  0008  	RETURN
+0309  09CC  	COMF CompTempVarRet391, F
+030A  09CD  	COMF CompTempVarRet391+D'1', F
+030B  0ACC  	INCF CompTempVarRet391, F
+030C  1903  	BTFSC gbl_status,2
+030D  0ACD  	INCF CompTempVarRet391+D'1', F
+030E  0008  	RETURN
+030F        ; } __mul_16s_16s__16 function end
+
+
+0649        _startup
+
+065E  3180  	MOVLP 0x00
+065F  2D2F  	GOTO	main
+
+8007  FFA4  	DW 0xFFA4
+8008  DEFF  	DW 0xDEFF

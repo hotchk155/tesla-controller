@@ -4,6 +4,8 @@ Target=PIC16F1825
 Active Compiler=BoostC
 Active Config=Debug
 Config=1
+Last ExtIdx=1
+Last Dir=D:\GitHub\Voici-Le-Strum\src\
 [Files]
 Count=1
 File0=tesla-controller.c

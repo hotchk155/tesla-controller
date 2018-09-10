@@ -32,8 +32,8 @@ RX		RC5 - RC0		AN
 OUT1	RC3 - RC2		AN
 */
 #define P_LED 	lata.5
-#define P_OUT1 	latc.3
-#define P_OUT2 	latc.1
+#define P_OUT1 	latc.1
+#define P_OUT2 	latc.3
 
 
 #define TRIS_A 	0b11011111
@@ -112,24 +112,6 @@ OSCILLATOR osc1;
 // SERIAL PORT OR WHEN TIMER 1 OVERLOWS
 void interrupt( void )
 {
-	// timer 0 rollover ISR. Maintains the count of 
-	// "system ticks" that we use for key debounce etc
-//	if(intcon.2)
-//	{
-		//tmr0 = TIMER_0_INIT_SCALAR;
-//		systemTicks++;
-//		intcon.2 = 0;
-//	}
-
-	// timer 1 rollover ISR. Responsible for timing
-	// the tempo of the MIDI clock
-//	if(pir1.0)
-	//{
-	//	tmr1l=(timer_init_scalar & 0xff); 
-		//tmr1h=(timer_init_scalar>>8); 
-		//tick_flag = 1;
-		//pir1.0 = 0;
-	//}
 
 	// Tone generation for voice 1
 	if(pir1.2) //CCP1IF
@@ -264,7 +246,6 @@ void adc_run()
 			if(d*d > 1) {
 				adc_chan[adc_current].result = adc_chan[adc_current].smoothed;
 				adc_chan[adc_current].status = 1;
-P_LED = 1;				
 			}
 				
 			// next channel
@@ -551,8 +532,8 @@ void main()
     trisc = TRIS_C;              
 	ansela = 0b00010100;		
 	anselc = 0b00000101;		
-	porta=0;
-	portc=0;
+	lata=0;
+	latc=0;
 
 	uart_init();
 

@@ -59,6 +59,57 @@ char midi_param = 0;					// number of params currently received
 #define NO_NOTE 0xFF
 
 
+
+#define NUM_ADC_CHANNELS	4
+#define MK_ADC_CONF(a) 0b00000001|((a)<<2)
+#define ADC_0_RA0	MK_ADC_CONF(0)
+#define ADC_1_RA1	MK_ADC_CONF(1)
+#define ADC_2_RA2	MK_ADC_CONF(2)
+#define ADC_3_RA4	MK_ADC_CONF(3)
+#define ADC_4_RC0	MK_ADC_CONF(4)
+#define ADC_5_RC1	MK_ADC_CONF(5)
+#define ADC_6_RC2	MK_ADC_CONF(6)
+#define ADC_7_RC3	MK_ADC_CONF(7)
+
+
+// MIDI message bytes
+#define MIDI_MTC_QTR_FRAME 		0xf1
+#define MIDI_SPP 				0xf2
+#define MIDI_SONG_SELECT 		0xf3 
+#define MIDI_SYNCH_TICK     	0xf8
+#define MIDI_SYNCH_START    	0xfa
+#define MIDI_SYNCH_CONTINUE 	0xfb
+#define MIDI_SYNCH_STOP     	0xfc
+#define MIDI_SYSEX_BEGIN     	0xf0
+#define MIDI_SYSEX_END     		0xf7
+
+enum {
+	KNOB_MODE = 1,	//
+	KNOB_FREQ = 3,
+	KNOB_DUTY1 = 0,//
+	KNOB_DUTY2 = 2
+};
+typedef struct {
+	byte config;
+	byte status;
+	unsigned int smoothed;
+	unsigned int result;
+} ADC_CHAN;
+
+ADC_CHAN adc_chan[NUM_ADC_CHANNELS] = {
+	{ADC_2_RA2},
+	{ADC_3_RA4},
+	{ADC_4_RC0},
+	{ADC_6_RC2}
+};
+byte adc_current = 0xFF;
+byte adc_delay = 0; // counter used to force delay for cap to charge
+
+int pitch_bend = 0;
+int mod_wheel = 127;
+byte mod_wheel_pending = 0;
+
+
 //////////////////////////////////////////////////
 #define OSC_RESOLUTION 1000000L
 #define WAVE_OFF 0xFF
@@ -94,29 +145,15 @@ OSCILLATOR osc2;
 		MODE_PITCHLO
 	};
 
-
-#define NUM_ADC_CHANNELS	4
-#define MK_ADC_CONF(a) 0b00000001|((a)<<2)
-#define ADC_0_RA0	MK_ADC_CONF(0)
-#define ADC_1_RA1	MK_ADC_CONF(1)
-#define ADC_2_RA2	MK_ADC_CONF(2)
-#define ADC_3_RA4	MK_ADC_CONF(3)
-#define ADC_4_RC0	MK_ADC_CONF(4)
-#define ADC_5_RC1	MK_ADC_CONF(5)
-#define ADC_6_RC2	MK_ADC_CONF(6)
-#define ADC_7_RC3	MK_ADC_CONF(7)
+#define MAX_NOTES 8
+typedef struct {
+	int count;
+	byte note[MAX_NOTES];
+} NOTE_STACK;
+NOTE_STACK notes_1;
+NOTE_STACK notes_2;
 
 
-// MIDI message bytes
-#define MIDI_MTC_QTR_FRAME 		0xf1
-#define MIDI_SPP 				0xf2
-#define MIDI_SONG_SELECT 		0xf3 
-#define MIDI_SYNCH_TICK     	0xf8
-#define MIDI_SYNCH_START    	0xfa
-#define MIDI_SYNCH_CONTINUE 	0xfb
-#define MIDI_SYNCH_STOP     	0xfc
-#define MIDI_SYSEX_BEGIN     	0xf0
-#define MIDI_SYSEX_END     		0xf7
 ////////////////////////////////////////////////////////////
 // INTERRUPT HANDLER CALLED WHEN CHARACTER RECEIVED AT 
 // SERIAL PORT OR WHEN TIMER 1 OVERLOWS
@@ -212,6 +249,7 @@ void interrupt( void )
 	}
 }
 
+////////////////////////////////////////////////////////////
 void osc_apply(OSCILLATOR *posc) {
 	long full_wave = OSC_RESOLUTION/posc->freq;
 	while(posc->update);
@@ -226,52 +264,35 @@ void osc_apply(OSCILLATOR *posc) {
 	posc->update = 1;
 	
 }
+
+////////////////////////////////////////////////////////////
 void osc_duty(OSCILLATOR *posc, int duty) {
 	posc->duty = duty;
 	osc_apply(posc);
 }
-void osc_play(OSCILLATOR *posc, int freq, byte midi_note) {
-	posc->midi_note = midi_note;
+
+////////////////////////////////////////////////////////////
+void osc_play(OSCILLATOR *posc, int freq) {
 	posc->freq = freq;
 	osc_apply(posc);
 }
+
+////////////////////////////////////////////////////////////
 void osc_stop(OSCILLATOR *posc) {
 	while(posc->update);
-	posc->midi_note = NO_NOTE;
 	posc->next_high_ticks = 0;
 	posc->next_low_ticks = 1000;
 	posc->update = 1;
 }
+
+////////////////////////////////////////////////////////////
 void osc_init(OSCILLATOR *posc) {
 	memset(posc, 0, sizeof(OSCILLATOR));
+	posc->midi_note = NO_NOTE;
 	posc->freq = 440;
 	posc->duty = 128;
 	osc_stop(posc);
 }
-
-enum {
-	KNOB_MODE = 1,	//
-	KNOB_FREQ = 3,
-	KNOB_DUTY1 = 0,//
-	KNOB_DUTY2 = 2
-};
-typedef struct {
-	byte config;
-	byte status;
-	unsigned int smoothed;
-	unsigned int result;
-} ADC_CHAN;
-
-ADC_CHAN adc_chan[NUM_ADC_CHANNELS] = {
-	{ADC_2_RA2},
-	{ADC_3_RA4},
-	{ADC_4_RC0},
-	{ADC_6_RC2}
-};
-byte adc_current = 0xFF;
-byte adc_delay = 0; // counter used to force delay for cap to charge
-
-int pitch_bend = 0;
 
 ///////////////////////////////////////////////////////
 // ADC STATE MACHINE
@@ -312,10 +333,6 @@ void adc_run()
 		adc_delay = 10;
 	}
 }
-
-
-
-
 
 ////////////////////////////////////////////////////////////
 // INITIALISE SERIAL PORT FOR MIDI
@@ -450,6 +467,7 @@ byte midi_in()
 	return 0;
 }
 
+////////////////////////////////////////////////////////////
 int get_freq(long note, int bend) {
 
 	const int f[] = {	
@@ -470,39 +488,39 @@ int get_freq(long note, int bend) {
 		note -=12;
 	}
 	
+	// add on the bend amount (number of notes * 256) and get the resulting midi note and remainder
 	note <<= 8;
 	note += bend;
 	bend = note & 0xFF;
 	note >>= 8;
 
-	int hz = f[note%12];	
+	int hz = f[note%12];	// get the whole part of the frequency
+	hz >>= (9-(note/12));	// tranpose into correct octave
+	
+	// the remainder is in 1/256th of notes
+	// the frequency of that fractional note added to base note frequency F 
+	// is F * 2^(1/12) * R/256
+	// F * 1.0594630943592952645618252949463 * R/256
+	// ( F * 69433 * R/256 ) / 65536
+	// ( F * 271 * R) / 65536
+	
 	hz += (int)(((long)hz*244*bend)/0x100000L);
 	
-	return  hz>>(9-(note/12));	
+	return  hz;
 }
 
+////////////////////////////////////////////////////////////
 static void play_note(OSCILLATOR *posc, byte note) {
-	//if(posc->midi_note == note) {
-//		return;
-//	}
-	//else 
 	if(note == NO_NOTE) {
 		osc_stop(posc);
 	}
 	else {
-		osc_play(posc, get_freq(note, pitch_bend), note);
+		osc_play(posc, get_freq(note, pitch_bend));
 	}
+	posc->midi_note = note;
 }
 
 
-
-#define MAX_NOTES 8
-typedef struct {
-	int count;
-	byte note[MAX_NOTES];
-} NOTE_STACK;
-NOTE_STACK notes_1;
-NOTE_STACK notes_2;
 
 ///////////////////////////////////////////////////////////////
 // ADD A NOTE TO A STACK
@@ -624,23 +642,77 @@ static void note_msg(NOTE_STACK *pstack, byte note, byte vel, byte mode)
 
 }
 
-static void cc_msg(byte cc, byte val) {
+////////////////////////////////////////////////////////////
+void cc_msg(byte cc, byte val) {
 	if(cc == 1) {
-		byte i=val * 2;
-		if(i < 5) val = 5;
-		if(i > 250) val = 250;
-		osc_duty(&osc1, i);		
-		osc_duty(&osc2, i);		
+		mod_wheel = val;
+		mod_wheel_pending = 1;
 	}
 }
 
-static void bend_msg(byte msb, byte lsb) {
+////////////////////////////////////////////////////////////
+void bend_msg(byte msb, byte lsb) {
+long q = ((long)256*12);
 	long bend = ((int)msb<<7|(lsb&0x7F)) - 8192;		// -8192 thru + 8192	
 	bend *= 256; // bend is store as MIDI notes * 256
 	bend /= 682; // over approx 1 octave 
+	if(bend < -q) {
+		bend = -q;
+	}
+	if(bend > q) {
+		bend = q;
+	}
 	pitch_bend = bend;
 	play_note(&osc1, osc1.midi_note);
 	play_note(&osc2, osc2.midi_note);	
+}
+
+////////////////////////////////////////////////////////////
+void update_duty() {
+	int duty1 = 0;
+	if(adc_chan[KNOB_DUTY1].result < 2) {
+		duty1 = 0;
+	}
+	else if(adc_chan[KNOB_DUTY1].result > 1020) {
+		duty1 = 255;
+	}
+	else {
+		duty1 = adc_chan[KNOB_DUTY1].result>>2;
+	}
+
+	int duty2 = 0;
+	if(adc_chan[KNOB_DUTY2].result < 2) {
+		duty2 = 0;
+	}
+	else if(adc_chan[KNOB_DUTY2].result > 1020) {
+		duty2 = 255;
+	}
+	else {
+		duty2 = adc_chan[KNOB_DUTY2].result>>2;
+	}
+	
+	
+	duty1 *= mod_wheel;
+	duty1 /= 128;
+
+	
+	if(!duty1 || osc1.midi_note == NO_NOTE) {
+		osc_stop(&osc1);
+	}
+	else {
+		osc_duty(&osc1, duty1);
+	}
+	
+	duty2 *= mod_wheel;
+	duty2 /= 128;
+
+	if(!duty2 || osc2.midi_note == NO_NOTE) {
+		osc_stop(&osc2);
+	}
+	else {
+		osc_duty(&osc2, duty2);
+	}
+	
 }
 
 ////////////////////////////////////////////////////////////
@@ -734,9 +806,15 @@ void main()
 	
 	notes_1.count = 0;
 	notes_2.count = 0;
+	byte led_count = 0;
 	for(;;) {
-P_LED = (notes_1.count > 2);
+
 		adc_run();
+		if(led_count) {
+			if(!--led_count) {
+				P_LED = 0;
+			}
+		}
 		
 		if(adc_chan[KNOB_MODE].status) {
 			adc_chan[KNOB_MODE].status = 0;
@@ -774,14 +852,20 @@ P_LED = (notes_1.count > 2);
 						rx_head = 0;
 						rx_tail = 0;
 						pitch_bend = 0;
+						mod_wheel = 127;
+						mod_wheel_pending = 1;
 						break;
 					case MODE_PITCH:
-						osc_play(&osc1, adc_chan[KNOB_MODE].result, 0);
-						osc_play(&osc2, adc_chan[KNOB_MODE].result, 0);
+						osc1.midi_note = 0;
+						osc2.midi_note = 0;
+						osc_play(&osc1, adc_chan[KNOB_MODE].result);
+						osc_play(&osc2, adc_chan[KNOB_MODE].result);
 						break;
 					case MODE_PITCHLO:
-						osc_play(&osc1, adc_chan[KNOB_MODE].result/16, 0);
-						osc_play(&osc2, adc_chan[KNOB_MODE].result/16, 0);
+						osc1.midi_note = 0;
+						osc2.midi_note = 0;
+						osc_play(&osc1, adc_chan[KNOB_MODE].result/16);
+						osc_play(&osc2, adc_chan[KNOB_MODE].result/16);
 						break;
 				}
 				mode = new_mode;
@@ -792,77 +876,41 @@ P_LED = (notes_1.count > 2);
 		switch(mode) {
 		case MODE_MIDI_MONO:	
 		case MODE_MIDI_DUAL:	
-			switch(msg) {
+			if(msg) {
+				P_LED = 1;
+				led_count = 25;
+			}
+			switch(msg & 0xF0) {
 			// MIDI NOTE 
 			case 0x80: note_msg(&notes_1, midi_params[0], 0, mode); break;
 			case 0x90: note_msg(&notes_1, midi_params[0], midi_params[1], mode); break;
 			case 0xB0: cc_msg(midi_params[0], midi_params[1]); break;
 			case 0xE0: bend_msg(midi_params[1], midi_params[0]); break;
 			default:
-				//P_LED = 0;
 				break;
 			}		
 			break;
 		case MODE_PITCH:	
 			if(adc_chan[KNOB_FREQ].status) {
 				adc_chan[KNOB_FREQ].status = 0;
-				osc_play(&osc1, adc_chan[KNOB_FREQ].result, 0);
-				osc_play(&osc2, adc_chan[KNOB_FREQ].result, 0);
+				osc_play(&osc1, adc_chan[KNOB_FREQ].result);
+				osc_play(&osc2, adc_chan[KNOB_FREQ].result);
 			}
 			break;
 		case MODE_PITCHLO:	
 			if(adc_chan[KNOB_FREQ].status) {
 				adc_chan[KNOB_FREQ].status = 0;
-				osc_play(&osc1, adc_chan[KNOB_FREQ].result/16, 0);
-				osc_play(&osc2, adc_chan[KNOB_FREQ].result/16, 0);
+				osc_play(&osc1, adc_chan[KNOB_FREQ].result/16);
+				osc_play(&osc2, adc_chan[KNOB_FREQ].result/16);
 			}
 			break;
 		}
 		
-		if(adc_chan[KNOB_DUTY1].status) {
+		if(adc_chan[KNOB_DUTY1].status || adc_chan[KNOB_DUTY2].status || mod_wheel_pending) {
+			update_duty();
 			adc_chan[KNOB_DUTY1].status = 0;
-			if(adc_chan[KNOB_DUTY1].result < 2) {
-				osc_stop(&osc1);
-			}
-			else if(adc_chan[KNOB_DUTY1].result > 1020) {
-				osc_duty(&osc1, 255);
-			}
-			else {
-				osc_duty(&osc1, adc_chan[KNOB_DUTY1].result>>2);
-			}
-		}
-		
-		if(adc_chan[KNOB_DUTY2].status) {
 			adc_chan[KNOB_DUTY2].status = 0;
-			if(adc_chan[KNOB_DUTY2].result < 2) {
-				osc_stop(&osc2);
-			}
-			else if(adc_chan[KNOB_DUTY1].result > 1020) {
-				osc_duty(&osc2, 255);
-			}
-			else {
-				osc_duty(&osc2, adc_chan[KNOB_DUTY2].result>>2);
-			}
-		}
-		
+			mod_wheel_pending = 0;
+		}		
 	}
 }
-
-/* 
-	< 100
-	< 300
-	< 500
-	< 700
-	< 900
-	
-	
-*/
-
-/*
-0
-192	200	
-394	400
-599	600
-804	800
-1000
-*/

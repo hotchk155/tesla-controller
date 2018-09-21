@@ -645,7 +645,7 @@ static void note_msg(NOTE_STACK *pstack, byte note, byte vel, byte mode)
 ////////////////////////////////////////////////////////////
 void cc_msg(byte cc, byte val) {
 	if(cc == 1) {
-		mod_wheel = val;
+		mod_wheel = (127-val)&0x7F;
 		mod_wheel_pending = 1;
 	}
 }
@@ -840,11 +840,15 @@ void main()
 			if(new_mode != mode) {
 				switch(new_mode) {
 					case MODE_OFF:
+						osc1.midi_note = NO_NOTE;
+						osc2.midi_note = NO_NOTE;
 						osc_stop(&osc1);
 						osc_stop(&osc2);
 						break;
 					case MODE_MIDI_MONO:					
 					case MODE_MIDI_DUAL:					
+						osc1.midi_note = NO_NOTE;
+						osc2.midi_note = NO_NOTE;
 						osc_stop(&osc1);
 						osc_stop(&osc2);
 						notes_1.count = 0;
@@ -860,12 +864,16 @@ void main()
 						osc2.midi_note = 0;
 						osc_play(&osc1, adc_chan[KNOB_MODE].result);
 						osc_play(&osc2, adc_chan[KNOB_MODE].result);
+						mod_wheel = 127;
+						mod_wheel_pending = 1;
 						break;
 					case MODE_PITCHLO:
 						osc1.midi_note = 0;
 						osc2.midi_note = 0;
 						osc_play(&osc1, adc_chan[KNOB_MODE].result/16);
 						osc_play(&osc2, adc_chan[KNOB_MODE].result/16);
+						mod_wheel = 127;
+						mod_wheel_pending = 1;
 						break;
 				}
 				mode = new_mode;
